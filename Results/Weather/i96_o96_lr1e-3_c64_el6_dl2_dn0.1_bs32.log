@@ -1,0 +1,150 @@
+
+Namespace(device='cuda', data_path='Weather', channel=64, num_nodes=21, seq_len=96, pred_len=96, batch_size=32, learning_rate=0.001, dropout_n=0.1, d_llm=768, e_layer=6, d_layer=2, head=8, weight_decay=0.001, num_workers=10, model_name='gpt2', epochs=20, seed=2024, es_patience=50, save='./logs/2026-03-09-11:27:10-')
+The number of trainable parameters: 41475489
+The number of parameters: 41475490
+Start training...
+Epoch: 001, Training Time: 116.4564 secs
+Epoch: 001, Validation Time: 19.7863 secs
+-----------------------
+Epoch: 001, Train Loss: 0.5282, Train MAE: 0.3696 
+Epoch: 001, Valid Loss: 0.4610, Valid MAE: 0.3086
+###Update tasks appear###
+Updating! Valid Loss:0.4610, epoch:  1
+Epoch: 002, Training Time: 130.7408 secs
+Epoch: 002, Validation Time: 18.0548 secs
+-----------------------
+Epoch: 002, Train Loss: 0.4797, Train MAE: 0.3434 
+Epoch: 002, Valid Loss: 0.4410, Valid MAE: 0.3003
+###Update tasks appear###
+Updating! Valid Loss:0.4410, epoch:  2
+Epoch: 003, Training Time: 131.8910 secs
+Epoch: 003, Validation Time: 20.5004 secs
+-----------------------
+Epoch: 003, Train Loss: 0.4693, Train MAE: 0.3345 
+Epoch: 003, Valid Loss: 0.4341, Valid MAE: 0.2981
+###Update tasks appear###
+Updating! Valid Loss:0.4341, epoch:  3
+Epoch: 004, Training Time: 135.9068 secs
+Epoch: 004, Validation Time: 18.7946 secs
+-----------------------
+Epoch: 004, Train Loss: 0.4622, Train MAE: 0.3319 
+Epoch: 004, Valid Loss: 0.4282, Valid MAE: 0.2968
+###Update tasks appear###
+Updating! Valid Loss:0.4282, epoch:  4
+Epoch: 005, Training Time: 137.3886 secs
+Epoch: 005, Validation Time: 19.6996 secs
+-----------------------
+Epoch: 005, Train Loss: 0.4500, Train MAE: 0.3237 
+Epoch: 005, Valid Loss: 0.4219, Valid MAE: 0.2925
+###Update tasks appear###
+Updating! Valid Loss:0.4219, epoch:  5
+Epoch: 006, Training Time: 137.5972 secs
+Epoch: 006, Validation Time: 20.2004 secs
+-----------------------
+Epoch: 006, Train Loss: 0.4456, Train MAE: 0.3192 
+Epoch: 006, Valid Loss: 0.4181, Valid MAE: 0.2894
+###Update tasks appear###
+Updating! Valid Loss:0.4181, epoch:  6
+Epoch: 007, Training Time: 140.5837 secs
+Epoch: 007, Validation Time: 20.9984 secs
+-----------------------
+Epoch: 007, Train Loss: 0.4396, Train MAE: 0.3151 
+Epoch: 007, Valid Loss: 0.4163, Valid MAE: 0.2886
+###Update tasks appear###
+Updating! Valid Loss:0.4163, epoch:  7
+Epoch: 008, Training Time: 138.7855 secs
+Epoch: 008, Validation Time: 20.6013 secs
+-----------------------
+Epoch: 008, Train Loss: 0.4294, Train MAE: 0.3092 
+Epoch: 008, Valid Loss: 0.4123, Valid MAE: 0.2843
+###Update tasks appear###
+Updating! Valid Loss:0.4123, epoch:  8
+Epoch: 009, Training Time: 140.8971 secs
+Epoch: 009, Validation Time: 20.7130 secs
+-----------------------
+Epoch: 009, Train Loss: 0.4220, Train MAE: 0.3045 
+Epoch: 009, Valid Loss: 0.4114, Valid MAE: 0.2842
+###Update tasks appear###
+Updating! Valid Loss:0.4114, epoch:  9
+Epoch: 010, Training Time: 138.8980 secs
+Epoch: 010, Validation Time: 20.0005 secs
+-----------------------
+Epoch: 010, Train Loss: 0.4150, Train MAE: 0.3004 
+Epoch: 010, Valid Loss: 0.4054, Valid MAE: 0.2793
+###Update tasks appear###
+Updating! Valid Loss:0.4054, epoch:  10
+Epoch: 011, Training Time: 139.0051 secs
+Epoch: 011, Validation Time: 20.7933 secs
+-----------------------
+Epoch: 011, Train Loss: 0.4102, Train MAE: 0.2959 
+Epoch: 011, Valid Loss: 0.4032, Valid MAE: 0.2778
+###Update tasks appear###
+On average horizons, Test MSE: 0.1778, Test MAE: 0.2242
+Test low! Updating! Test Loss: 0.1778, Test low! Updating! Valid Loss: 0.4032, epoch:  11
+Epoch: 012, Training Time: 132.9852 secs
+Epoch: 012, Validation Time: 20.3989 secs
+-----------------------
+Epoch: 012, Train Loss: 0.4047, Train MAE: 0.2928 
+Epoch: 012, Valid Loss: 0.4015, Valid MAE: 0.2758
+###Update tasks appear###
+On average horizons, Test MSE: 0.1764, Test MAE: 0.2234
+Test low! Updating! Test Loss: 0.1764, Test low! Updating! Valid Loss: 0.4015, epoch:  12
+Epoch: 013, Training Time: 141.1878 secs
+Epoch: 013, Validation Time: 20.3997 secs
+-----------------------
+Epoch: 013, Train Loss: 0.3984, Train MAE: 0.2881 
+Epoch: 013, Valid Loss: 0.4021, Valid MAE: 0.2758
+No update
+Epoch: 014, Training Time: 136.2979 secs
+Epoch: 014, Validation Time: 19.9993 secs
+-----------------------
+Epoch: 014, Train Loss: 0.3934, Train MAE: 0.2852 
+Epoch: 014, Valid Loss: 0.3993, Valid MAE: 0.2736
+###Update tasks appear###
+On average horizons, Test MSE: 0.1742, Test MAE: 0.2215
+Test low! Updating! Test Loss: 0.1742, Test low! Updating! Valid Loss: 0.3993, epoch:  14
+Epoch: 015, Training Time: 138.7849 secs
+Epoch: 015, Validation Time: 20.9990 secs
+-----------------------
+Epoch: 015, Train Loss: 0.3888, Train MAE: 0.2812 
+Epoch: 015, Valid Loss: 0.4021, Valid MAE: 0.2731
+No update
+Epoch: 016, Training Time: 139.2985 secs
+Epoch: 016, Validation Time: 20.1011 secs
+-----------------------
+Epoch: 016, Train Loss: 0.3852, Train MAE: 0.2794 
+Epoch: 016, Valid Loss: 0.3976, Valid MAE: 0.2708
+###Update tasks appear###
+On average horizons, Test MSE: 0.1704, Test MAE: 0.2174
+Test low! Updating! Test Loss: 0.1704, Test low! Updating! Valid Loss: 0.3976, epoch:  16
+Epoch: 017, Training Time: 137.6928 secs
+Epoch: 017, Validation Time: 19.5545 secs
+-----------------------
+Epoch: 017, Train Loss: 0.3800, Train MAE: 0.2762 
+Epoch: 017, Valid Loss: 0.3977, Valid MAE: 0.2700
+No update
+Epoch: 018, Training Time: 139.0014 secs
+Epoch: 018, Validation Time: 21.0980 secs
+-----------------------
+Epoch: 018, Train Loss: 0.3769, Train MAE: 0.2746 
+Epoch: 018, Valid Loss: 0.3988, Valid MAE: 0.2714
+No update
+Epoch: 019, Training Time: 136.3986 secs
+Epoch: 019, Validation Time: 21.9001 secs
+-----------------------
+Epoch: 019, Train Loss: 0.3754, Train MAE: 0.2739 
+Epoch: 019, Valid Loss: 0.4006, Valid MAE: 0.2734
+No update
+Epoch: 020, Training Time: 139.5964 secs
+Epoch: 020, Validation Time: 20.7607 secs
+-----------------------
+Epoch: 020, Train Loss: 0.3752, Train MAE: 0.2740 
+Epoch: 020, Valid Loss: 0.4010, Valid MAE: 0.2740
+No update
+Average Training Time: 136.4697 secs/epoch
+Average Validation Time: 20.2677 secs
+Training ends
+The epoch of the best result： 16
+The valid loss of the best model 0.3976
+On average horizons, Test MSE: 0.1704, Test MAE: 0.2174
+Total time spent: 3376.3920
