@@ -10,6 +10,26 @@ import warnings
 
 warnings.filterwarnings('ignore')
 
+
+def _load_embedding_tensor(file_path, num_nodes, d_llm=768):
+    with h5py.File(file_path, 'r') as hf:
+        raw_data = hf['embeddings'][:]
+
+    tensor = torch.from_numpy(raw_data).float()
+    if tensor.dim() == 1:
+        return tensor.unsqueeze(0).repeat(num_nodes, 1)
+    if tensor.dim() == 2:
+        if tensor.shape[0] == num_nodes:
+            return tensor
+        if tensor.shape[1] == num_nodes:
+            return tensor.transpose(0, 1)
+        if tensor.shape[0] == d_llm:
+            return tensor.transpose(0, 1)
+    raise ValueError(
+        f"CRITICAL DIMENSION MISMATCH: Found {tuple(tensor.shape)} at {file_path}. "
+        f"Expected ({num_nodes}, {d_llm}) or compatible legacy shapes."
+    )
+
 class Dataset_ETT_hour(Dataset):
     def __init__(self, root_path="./dataset/ETT-small/", flag='train', size=None,
                  features='M', data_path='ETTh1.csv',
@@ -67,11 +87,7 @@ class Dataset_ETT_hour(Dataset):
             print(f"Error: {os.path.abspath(file_path)} NOT FOUND")
             print(f"Current working directory: {os.getcwd()}")
             raise FileNotFoundError(f"Missing embedding file at {file_path}")
-            
-        with h5py.File(file_path, 'r') as hf:
-            data = hf['embeddings'][:]
-            embeddings = torch.from_numpy(data).float().squeeze(0)
-            if embeddings.dim() == 1: embeddings = embeddings.unsqueeze(-1).repeat(1, self.num_nodes)
+        embeddings = _load_embedding_tensor(file_path, num_nodes=self.num_nodes)
         return seq_x, seq_y, seq_x_mark, seq_y_mark, embeddings
 
     def __len__(self):
@@ -134,11 +150,7 @@ class Dataset_ETT_minute(Dataset):
             print(f"Error: {os.path.abspath(file_path)} NOT FOUND")
             print(f"Current working directory: {os.getcwd()}")
             raise FileNotFoundError(f"Missing embedding file at {file_path}")
-            
-        with h5py.File(file_path, 'r') as hf:
-            data = hf['embeddings'][:]
-            embeddings = torch.from_numpy(data).float().squeeze(0)
-            if embeddings.dim() == 1: embeddings = embeddings.unsqueeze(-1).repeat(1, self.num_nodes)
+        embeddings = _load_embedding_tensor(file_path, num_nodes=self.num_nodes)
         return seq_x, seq_y, seq_x_mark, seq_y_mark, embeddings
 
     def __len__(self):
@@ -227,23 +239,7 @@ class Dataset_Custom(Dataset):
             print(f"Error: {os.path.abspath(file_path)} NOT FOUND")
             print(f"Current working directory: {os.getcwd()}")
             raise FileNotFoundError(f"Missing embedding file at {file_path}")
-            
-        with h5py.File(file_path, 'r') as hf:
-            raw_data = hf['embeddings'][:].flatten()
-            
-            # 自动化维度探测与修复逻辑
-            if raw_data.shape[0] == 768:
-                # 标准情况：正好是 768 维
-                tensor = torch.from_numpy(raw_data).float()
-            elif raw_data.shape[0] % 768 == 0:
-                # 兼容情况：文件里存了多个节点的合并数据 (如 5376)，只取第一组 768
-                tensor = torch.from_numpy(raw_data[:768]).float()
-            else:
-                # 无法自动修复的情况
-                raise ValueError(f"CRITICAL DIMENSION MISMATCH: Found {raw_data.shape[0]} at {file_path}. Expected 768 or a multiple. Please re-run Store_600519_daily.sh")
-            
-            # 统一分发给所有节点
-            embeddings = torch.stack([tensor] * self.num_nodes, dim=-1) # [768, Nodes]
+        embeddings = _load_embedding_tensor(file_path, num_nodes=self.num_nodes)
         return seq_x, seq_y, seq_x_mark, seq_y_mark, embeddings
 
     def __len__(self):

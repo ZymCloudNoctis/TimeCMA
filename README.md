@@ -48,3 +48,92 @@ bash Store_{data_name}.sh
 ```bash
 bash {data_name}.sh
 ```
+
+* ### Co-occurrence graph construction
+
+Build a COGRASP-style co-occurrence graph from the multivariate variables in a TimeCMA dataset:
+
+```bash
+python build_graph.py \
+  --root_path . \
+  --data_path dataset/ETT-small/600519_enriched.csv \
+  --output_path dataset/ETT-small/600519_enriched_cooccurrence_train.csv \
+  --split train \
+  --seq_len 60 \
+  --pred_len 5
+```
+
+The stock `600519` training script now supports `--auto_build_graph` and will automatically create or reuse the graph file before training.
+
+## Multi-Stock Prototype
+
+This repo now includes a multi-stock TimeCMA path where nodes are stocks instead of factor columns.
+
+### Expected market data format
+
+Provide a long-form CSV with at least these canonical fields:
+
+```text
+date,stock_code,open,high,low,close,vol,amount
+```
+
+The loader also accepts common aliases used by A-share daily bars, including:
+
+```text
+ts_code/code -> stock_code
+volume -> vol
+turnover -> amount
+trade_date -> date
+```
+
+Provide a stock pool file (`.txt` or `.csv`) whose order is the single source of truth for:
+
+* time-series node order
+* LLM embedding node order
+* graph matrix row/column order
+
+Provide your Snowball / COGRASP co-occurrence matrix as a square CSV whose row and column labels match the stock pool codes.
+
+### Generate multi-stock prompt embeddings
+
+```bash
+bash scripts/Store_MultiStock_Prototype.sh
+```
+
+### Train the multi-stock model
+
+```bash
+bash scripts/MultiStock_Prototype.sh
+```
+
+The multi-stock training path predicts future `target_horizon`-day returns per stock and reports `MSE`, `MAE`, and cross-sectional `RankIC`.
+
+### HS300 + Snowball static graph
+
+This repo now includes the HS300 files needed by the multi-stock pipeline directly inside `TimeCMA`:
+
+* `dataset/HS300/raw_stock_data.csv`
+* `dataset/HS300/stock_pool.csv`
+* `dataset/HS300/hs300_news_cooccurrence_2025-01-01_2025-05-31.csv`
+
+The default split policy is:
+
+* train/validation sample range: `2015-01-01` to `2025-05-31`
+* test sample range: `2025-06-01` to `2025-09-30`
+* validation split: the last `10%` of train/validation samples in chronological order
+
+Run:
+
+```bash
+bash scripts/Store_HS300_Snowball.sh
+bash scripts/HS300_Snowball.sh
+```
+
+If you want to point to another market CSV, pass it as the first argument:
+
+```bash
+bash scripts/Store_HS300_Snowball.sh /absolute/path/to/hs300_quotes.csv
+bash scripts/HS300_Snowball.sh /absolute/path/to/hs300_quotes.csv
+```
+
+The static graph is still the Snowball news co-occurrence matrix built from `2025-01-01` through `2025-05-31`, and the training/validation window is aligned to that period.

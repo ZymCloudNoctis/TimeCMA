@@ -33,3 +33,28 @@ def metric(pred, true):
     
     # return mae,mse,rmse,mape,mspe
     return mse,mae
+
+
+def _rank_tensor(values):
+    order = torch.argsort(values, dim=-1)
+    ranks = torch.argsort(order, dim=-1).float()
+    return ranks
+
+
+def rank_ic(pred, true):
+    if pred.dim() == 1:
+        pred = pred.unsqueeze(0)
+        true = true.unsqueeze(0)
+
+    pred_ranks = _rank_tensor(pred)
+    true_ranks = _rank_tensor(true)
+
+    pred_centered = pred_ranks - pred_ranks.mean(dim=-1, keepdim=True)
+    true_centered = true_ranks - true_ranks.mean(dim=-1, keepdim=True)
+
+    numerator = (pred_centered * true_centered).sum(dim=-1)
+    denominator = torch.sqrt(
+        torch.clamp((pred_centered ** 2).sum(dim=-1) * (true_centered ** 2).sum(dim=-1), min=1e-12)
+    )
+    correlations = numerator / denominator
+    return correlations.mean()

@@ -6,6 +6,7 @@ export PYTHONPATH=$PYTHONPATH:.
 
 data_path="dataset/ETT-small/600519_enriched.csv"
 root_path="."
+graph_file="dataset/ETT-small/600519_enriched_cooccurrence_train.csv"
 num_nodes=25
 freq="d"
 seq_len=60   # 与生成脚本保持一致
@@ -27,4 +28,4 @@ mkdir -p "$log_dir"
 log_file="${log_dir}sensitive_run.log"
 
 echo "开始最终平衡版训练 (Returns, seq=${seq_len})..."
-python -u train.py --data_path "$data_path" --root_path "$root_path" --num_nodes "$num_nodes" --seq_len "$seq_len" --pred_len "$pred_len" --batch_size "$batch_size" --freq "$freq" --learning_rate "$learning_rate" --channel "$channel" --e_layer "$e_layer" --d_layer "$d_layer" --dropout_n "$dropout_n" --weight_decay "$weight_decay" --epochs "$epochs" --es_patience "$patience" > "$log_file" 2>&1
+python -u train.py --data_path "$data_path" --root_path "$root_path" --graph_file "$graph_file" --auto_build_graph --num_nodes "$num_nodes" --seq_len "$seq_len" --pred_len "$pred_len" --batch_size "$batch_size" --freq "$freq" --learning_rate "$learning_rate" --channel "$channel" --e_layer "$e_layer" --d_layer "$d_layer" --dropout_n "$dropout_n" --weight_decay "$weight_decay" --epochs "$epochs" --es_patience "$patience" > "$log_file" 2>&1
