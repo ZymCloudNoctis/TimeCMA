@@ -2,12 +2,17 @@ import torch
 import sys
 import os
 import time
-import h5py
 import argparse
+import numpy as np
 from torch.utils.data import DataLoader
 from data_provider.data_loader_save import Dataset_ETT_hour, Dataset_ETT_minute, Dataset_Custom
 from data_provider.data_loader_multistock import MultiStockSaveDataset
 from gen_prompt_emb import GenPromptEmb
+
+try:
+    import h5py
+except ImportError:
+    h5py = None
 
 def parse_args():
     parser = argparse.ArgumentParser()
@@ -64,6 +69,18 @@ def get_dataset(root_path, data_path, flag, input_len, output_len, freq, args):
     dataset_class = datasets.get(data_path, Dataset_Custom)
     return dataset_class(root_path=root_path, flag=flag, size=[input_len, 0, output_len], data_path=data_path, freq=freq)
 
+
+def _save_embedding_file(file_stem, save_data):
+    if h5py is not None:
+        file_path = f"{file_stem}.h5"
+        with h5py.File(file_path, 'w') as hf:
+            hf.create_dataset('embeddings', data=save_data)
+        return file_path
+
+    file_path = f"{file_stem}.npy"
+    np.save(file_path, save_data)
+    return file_path
+
 def save_embeddings(args):
     device = torch.device(args.device if torch.cuda.is_available() else "cpu")
     train_set = get_dataset(args.root_path, args.data_path, 'train', args.input_len, args.output_len, args.freq, args)
@@ -107,11 +124,9 @@ def save_embeddings(args):
         
         batch_size = embeddings.shape[0]
         for b in range(batch_size):
-            file_path = f"{save_path}{count}.h5"
+            file_stem = f"{save_path}{count}"
             save_data = embeddings[b].cpu().numpy()
-
-            with h5py.File(file_path, 'w') as hf:
-                hf.create_dataset('embeddings', data=save_data)
+            _save_embedding_file(file_stem, save_data)
             count += 1
 
         # # Save and visualize the first sample

@@ -112,15 +112,15 @@ The multi-stock training path predicts future `target_horizon`-day returns per s
 
 This repo now includes the HS300 files needed by the multi-stock pipeline directly inside `TimeCMA`:
 
-* `dataset/HS300/raw_stock_data.csv`
+* `dataset/HS300/all_stocks_complete_data.csv`
 * `dataset/HS300/stock_pool.csv`
-* `dataset/HS300/hs300_news_cooccurrence_2025-01-01_2025-05-31.csv`
+* `dataset/HS300/hs300_news_cooccurrence_2024-01-01_2025-05-31.csv`
 
 The default split policy is:
 
-* train/validation sample range: `2015-01-01` to `2025-05-31`
+* train/validation sample range: `2024-01-01` to `2025-05-31`
 * test sample range: `2025-06-01` to `2025-09-30`
-* validation split: the last `10%` of train/validation samples in chronological order
+* validation split: the last `20%` of train/validation samples in chronological order
 
 Run:
 
@@ -136,4 +136,4 @@ bash scripts/Store_HS300_Snowball.sh /absolute/path/to/hs300_quotes.csv
 bash scripts/HS300_Snowball.sh /absolute/path/to/hs300_quotes.csv
 ```
 
-The static graph is still the Snowball news co-occurrence matrix built from `2025-01-01` through `2025-05-31`, and the training/validation window is aligned to that period.
+The default static graph is the Snowball news co-occurrence matrix built from `2024-01-01` through `2025-05-31`, and the training/validation window is aligned to that period.

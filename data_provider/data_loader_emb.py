@@ -5,15 +5,37 @@ import torch
 from torch.utils.data import Dataset
 from sklearn.preprocessing import StandardScaler
 from utils.timefeatures import time_features
-import h5py
 import warnings
 
 warnings.filterwarnings('ignore')
 
+try:
+    import h5py
+except ImportError:
+    h5py = None
+
+
+def _resolve_embedding_file(embed_path, index):
+    candidates = [
+        os.path.join(embed_path, f"{index}.npy"),
+        os.path.join(embed_path, f"{index}.h5"),
+    ]
+    for file_path in candidates:
+        if os.path.exists(file_path):
+            return file_path
+    raise FileNotFoundError(f"Missing embedding file at {candidates[0]} or {candidates[1]}")
+
 
 def _load_embedding_tensor(file_path, num_nodes, d_llm=768):
-    with h5py.File(file_path, 'r') as hf:
-        raw_data = hf['embeddings'][:]
+    if file_path.endswith(".npy"):
+        raw_data = np.load(file_path)
+    elif file_path.endswith(".h5"):
+        if h5py is None:
+            raise ImportError(f"h5py is required to read HDF5 embeddings: {file_path}")
+        with h5py.File(file_path, 'r') as hf:
+            raw_data = hf['embeddings'][:]
+    else:
+        raise ValueError(f"Unsupported embedding file format: {file_path}")
 
     tensor = torch.from_numpy(raw_data).float()
     if tensor.dim() == 1:
@@ -82,7 +104,7 @@ class Dataset_ETT_hour(Dataset):
         r_begin, r_end = s_end - self.label_len, s_end + self.pred_len
         seq_x, seq_y = self.data_x[s_begin:s_end], self.data_y[r_begin:r_end]
         seq_x_mark, seq_y_mark = self.data_stamp[s_begin:s_end], self.data_stamp[r_begin:r_end]
-        file_path = os.path.join(self.embed_path, f"{index}.h5")
+        file_path = _resolve_embedding_file(self.embed_path, index)
         if not os.path.exists(file_path):
             print(f"Error: {os.path.abspath(file_path)} NOT FOUND")
             print(f"Current working directory: {os.getcwd()}")
@@ -145,7 +167,7 @@ class Dataset_ETT_minute(Dataset):
         r_begin, r_end = s_end - self.label_len, s_end + self.pred_len
         seq_x, seq_y = self.data_x[s_begin:s_end], self.data_y[r_begin:r_end]
         seq_x_mark, seq_y_mark = self.data_stamp[s_begin:s_end], self.data_stamp[r_begin:r_end]
-        file_path = os.path.join(self.embed_path, f"{index}.h5")
+        file_path = _resolve_embedding_file(self.embed_path, index)
         if not os.path.exists(file_path):
             print(f"Error: {os.path.abspath(file_path)} NOT FOUND")
             print(f"Current working directory: {os.getcwd()}")
@@ -234,7 +256,7 @@ class Dataset_Custom(Dataset):
         r_begin, r_end = s_end - self.label_len, s_end + self.pred_len
         seq_x, seq_y = self.data_x[s_begin:s_end], self.data_y[r_begin:r_end]
         seq_x_mark, seq_y_mark = self.data_stamp[s_begin:s_end], self.data_stamp[r_begin:r_end]
-        file_path = os.path.join(self.embed_path, f"{index}.h5")
+        file_path = _resolve_embedding_file(self.embed_path, index)
         if not os.path.exists(file_path):
             print(f"Error: {os.path.abspath(file_path)} NOT FOUND")
             print(f"Current working directory: {os.getcwd()}")

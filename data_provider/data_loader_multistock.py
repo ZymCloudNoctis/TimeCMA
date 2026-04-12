@@ -1,7 +1,6 @@
 import os
 import warnings
 
-import h5py
 import numpy as np
 import pandas as pd
 import torch
@@ -11,6 +10,11 @@ from utils.graph_utils import load_stock_pool, normalize_stock_code, resolve_dat
 from utils.tools import StandardScaler
 
 warnings.filterwarnings("ignore")
+
+try:
+    import h5py
+except ImportError:
+    h5py = None
 
 
 PRICE_COLUMNS = ["open", "high", "low", "close"]
@@ -30,16 +34,61 @@ def _find_column(columns, candidates, required=True):
 
 def _canonicalize_columns(df):
     rename_map = {
-        _find_column(df.columns, ["date", "trade_date"]): "date",
-        _find_column(df.columns, ["stock_code", "ts_code", "code", "ticker", "symbol"]): "stock_code",
-        _find_column(df.columns, ["open"]): "open",
-        _find_column(df.columns, ["high"]): "high",
-        _find_column(df.columns, ["low"]): "low",
-        _find_column(df.columns, ["close"]): "close",
-        _find_column(df.columns, ["vol", "volume"]): "vol",
-        _find_column(df.columns, ["amount", "turnover", "turnover_value"]): "amount",
+        _find_column(df.columns, ["date", "trade_date", "交易日期"]): "date",
+        _find_column(df.columns, ["stock_code", "ts_code", "code", "ticker", "symbol", "股票代码"]): "stock_code",
+        _find_column(df.columns, ["open", "开盘价"]): "open",
+        _find_column(df.columns, ["high", "最高价"]): "high",
+        _find_column(df.columns, ["low", "最低价"]): "low",
+        _find_column(df.columns, ["close", "收盘价"], required=False): "close",
+        _find_column(df.columns, ["pre_close", "昨收价"], required=False): "pre_close",
+        _find_column(df.columns, ["change", "涨跌额"], required=False): "change",
+        _find_column(df.columns, ["pct_chg", "涨跌幅"], required=False): "pct_chg",
+        _find_column(df.columns, ["vol", "volume", "成交量"]): "vol",
+        _find_column(df.columns, ["amount", "turnover", "turnover_value", "成交额"]): "amount",
     }
+    rename_map = {source: target for source, target in rename_map.items() if source is not None}
     return df.rename(columns=rename_map)
+
+
+def _ensure_close_column(df):
+    close_series = pd.to_numeric(df["close"], errors="coerce") if "close" in df.columns else None
+    if close_series is not None and close_series.notna().any():
+        df["close"] = close_series
+        return df
+
+    derived_close = None
+    if "pre_close" in df.columns and "change" in df.columns:
+        pre_close = pd.to_numeric(df["pre_close"], errors="coerce")
+        change = pd.to_numeric(df["change"], errors="coerce")
+        derived_close = pre_close + change
+
+    if (derived_close is None or not derived_close.notna().any()) and "pre_close" in df.columns and "pct_chg" in df.columns:
+        pre_close = pd.to_numeric(df["pre_close"], errors="coerce")
+        pct_chg = pd.to_numeric(df["pct_chg"], errors="coerce")
+        derived_close = pre_close * (1.0 + pct_chg / 100.0)
+
+    if derived_close is None or not derived_close.notna().any():
+        raise ValueError("Unable to derive 'close' from the market data. Expected 'close' or ('pre_close' + 'change').")
+
+    df["close"] = derived_close
+    return df
+
+
+def _parse_date_series(series):
+    text = series.astype(str).str.strip()
+    normalized = text.str.replace(r"\.0$", "", regex=True)
+    digit_mask = normalized.str.fullmatch(r"\d{8}")
+
+    parsed = pd.Series(pd.NaT, index=series.index, dtype="datetime64[ns]")
+    if digit_mask.any():
+        parsed.loc[digit_mask] = pd.to_datetime(normalized.loc[digit_mask], format="%Y%m%d", errors="coerce")
+    if (~digit_mask).any():
+        parsed.loc[~digit_mask] = pd.to_datetime(normalized.loc[~digit_mask], errors="coerce")
+
+    if parsed.isna().any():
+        sample_bad = normalized.loc[parsed.isna()].head(5).tolist()
+        raise ValueError(f"Failed to parse date values. Sample invalid dates: {sample_bad}")
+    return parsed
 
 
 def _build_time_marks(date_index, timeenc=0):
@@ -181,6 +230,28 @@ def _prepare_stock_frame(stock_df, all_dates):
     return stock_df[DEFAULT_FEATURE_COLUMNS].astype(np.float32)
 
 
+def _resolve_embedding_file(embed_path, index):
+    candidates = [
+        os.path.join(embed_path, f"{index}.npy"),
+        os.path.join(embed_path, f"{index}.h5"),
+    ]
+    for file_path in candidates:
+        if os.path.exists(file_path):
+            return file_path
+    raise FileNotFoundError(f"Missing embedding file at {candidates[0]} or {candidates[1]}")
+
+
+def _load_embedding_array(file_path):
+    if file_path.endswith(".npy"):
+        return np.load(file_path)
+    if file_path.endswith(".h5"):
+        if h5py is None:
+            raise ImportError(f"h5py is required to read HDF5 embeddings: {file_path}")
+        with h5py.File(file_path, "r") as hf:
+            return hf["embeddings"][:]
+    raise ValueError(f"Unsupported embedding file format: {file_path}")
+
+
 class _BaseMultiStockDataset(Dataset):
     def __init__(
         self,
@@ -241,7 +312,8 @@ class _BaseMultiStockDataset(Dataset):
         data_file = resolve_data_path(self.root_path, self.data_path)
         df_raw = pd.read_csv(data_file)
         df_raw = _canonicalize_columns(df_raw)
-        df_raw["date"] = pd.to_datetime(df_raw["date"])
+        df_raw = _ensure_close_column(df_raw)
+        df_raw["date"] = _parse_date_series(df_raw["date"])
         df_raw["stock_code"] = df_raw["stock_code"].map(normalize_stock_code)
         if self.start_date is not None:
             df_raw = df_raw[df_raw["date"] >= self.start_date]
@@ -353,24 +425,20 @@ class MultiStockEmbeddingDataset(_BaseMultiStockDataset):
         seq_x_mark = self.data_stamp[s_begin:s_end]
         seq_y_mark = self._get_target_mark(label_index)
 
-        file_path = os.path.join(self.embed_path, f"{index}.h5")
-        if not os.path.exists(file_path):
-            raise FileNotFoundError(f"Missing embedding file at {file_path}")
+        file_path = _resolve_embedding_file(self.embed_path, index)
+        data = _load_embedding_array(file_path)
+        embeddings = torch.from_numpy(data).float()
+        if embeddings.dim() == 1:
+            embeddings = embeddings.unsqueeze(0).repeat(self.num_nodes, 1)
+        elif embeddings.dim() == 2 and embeddings.shape[0] != self.num_nodes and embeddings.shape[1] == self.num_nodes:
+            embeddings = embeddings.transpose(0, 1)
+        elif embeddings.dim() != 2:
+            raise ValueError(f"Unexpected embedding shape {tuple(embeddings.shape)} in {file_path}")
 
-        with h5py.File(file_path, "r") as hf:
-            data = hf["embeddings"][:]
-            embeddings = torch.from_numpy(data).float()
-            if embeddings.dim() == 1:
-                embeddings = embeddings.unsqueeze(0).repeat(self.num_nodes, 1)
-            elif embeddings.dim() == 2 and embeddings.shape[0] != self.num_nodes and embeddings.shape[1] == self.num_nodes:
-                embeddings = embeddings.transpose(0, 1)
-            elif embeddings.dim() != 2:
-                raise ValueError(f"Unexpected embedding shape {tuple(embeddings.shape)} in {file_path}")
-
-            if embeddings.shape[0] != self.num_nodes:
-                raise ValueError(
-                    f"Embedding node count mismatch in {file_path}: "
-                    f"expected {self.num_nodes}, got {embeddings.shape[0]}"
-                )
+        if embeddings.shape[0] != self.num_nodes:
+            raise ValueError(
+                f"Embedding node count mismatch in {file_path}: "
+                f"expected {self.num_nodes}, got {embeddings.shape[0]}"
+            )
 
         return seq_x, seq_y, seq_x_mark, seq_y_mark, embeddings

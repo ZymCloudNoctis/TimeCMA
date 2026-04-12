@@ -169,9 +169,9 @@ def build_and_save_cooccurrence_graph(
 
 def load_graph_adjacency(graph_file, node_columns, add_self_loops=True):
     graph_df = pd.read_csv(graph_file, index_col=0)
-    graph_df.index = graph_df.index.astype(str)
-    graph_df.columns = graph_df.columns.astype(str)
-    node_columns = [str(column) for column in node_columns]
+    graph_df.index = [normalize_stock_code(value) for value in graph_df.index]
+    graph_df.columns = [normalize_stock_code(value) for value in graph_df.columns]
+    node_columns = [normalize_stock_code(column) for column in node_columns]
     missing_columns = [column for column in node_columns if column not in graph_df.columns or column not in graph_df.index]
     if missing_columns:
         raise ValueError(f"Graph file {graph_file} is missing node columns: {missing_columns}")

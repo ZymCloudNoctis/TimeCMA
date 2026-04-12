@@ -6,7 +6,6 @@ from torch.utils.data import Dataset, DataLoader
 from utils.tools import StandardScaler
 from utils.timefeatures import time_features
 import warnings
-import h5py
 
 warnings.filterwarnings('ignore')
 
