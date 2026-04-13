@@ -137,3 +137,38 @@ bash scripts/HS300_Snowball.sh /absolute/path/to/hs300_quotes.csv
 ```
 
 The default static graph is the Snowball news co-occurrence matrix built from `2024-01-01` through `2025-05-31`, and the training/validation window is aligned to that period.
+
+### HS300 rolling-window experiments
+
+The repo also includes a rolling-window experiment runner for the thesis setup:
+
+* methods: `no_graph`, `static`, `dynamic6m`
+* train window: `12` months
+* validation window: `3` months
+* test window: `1` month
+* rolling step: `1` month
+* default test months: `2025-04` through `2025-09`
+
+The runner will:
+
+* build per-window Snowball co-occurrence graphs
+* apply exponential time decay to the `dynamic6m` graph with a default half-life of `60` days
+* generate per-window prompt embeddings
+* train each method on each rolling window
+* save per-window metrics and an aggregated summary CSV/JSON, including `IC`, `ICIR`, `RankIC`, and `RankICIR`
+
+By default, graph loading uses:
+
+* weight transform: `log1p`
+* neighbor filter: keep each node's top `10` neighbors
+
+Run:
+
+```bash
+bash scripts/Rolling_HS300_Experiments.sh
+```
+
+Outputs are written to:
+
+* `results/all_stocks_complete_data/rolling_experiments/window_metrics.csv`
+* `results/all_stocks_complete_data/rolling_experiments/method_summary.csv`

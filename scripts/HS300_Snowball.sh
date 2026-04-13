@@ -55,6 +55,8 @@ dropout_n=0.2
 weight_decay=0.001
 epochs=100
 patience=30
+graph_weight_transform="log1p"
+graph_top_k=10
 
 log_dir="./Results/HS300_Snowball/"
 mkdir -p "$log_dir"
@@ -68,6 +70,8 @@ echo "全局时间窗口: $start_date ~ $end_date"
 echo "训练/验证窗口: $trainval_start_date ~ $trainval_end_date"
 echo "测试窗口: $test_start_date ~ $test_end_date"
 echo "验证比例: $val_ratio"
+echo "图权重变换: $graph_weight_transform"
+echo "图 top-k: $graph_top_k"
 
 "$python_bin" -u build_runtime_assets.py \
   --market_data "$data_path" \
@@ -86,6 +90,8 @@ echo "训练日志: $log_file"
   --root_path "$root_path" \
   --stock_pool_file "$stock_pool_file" \
   --graph_file "$graph_file" \
+  --graph_weight_transform "$graph_weight_transform" \
+  --graph_top_k "$graph_top_k" \
   --num_nodes "$num_nodes" \
   --seq_len "$seq_len" \
   --target_horizon "$target_horizon" \

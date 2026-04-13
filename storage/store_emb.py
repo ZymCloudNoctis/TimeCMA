@@ -6,7 +6,7 @@ import argparse
 import numpy as np
 from torch.utils.data import DataLoader
 from data_provider.data_loader_save import Dataset_ETT_hour, Dataset_ETT_minute, Dataset_Custom
-from data_provider.data_loader_multistock import MultiStockSaveDataset
+from data_provider.data_loader_multistock import MultiStockSaveDataset, resolve_embedding_dir
 from gen_prompt_emb import GenPromptEmb
 
 try:
@@ -34,11 +34,16 @@ def parse_args():
     parser.add_argument("--target_horizon", type=int, default=5, help="future return horizon for multi-stock tasks")
     parser.add_argument("--start_date", type=str, default="", help="inclusive start date for multi-stock filtering")
     parser.add_argument("--end_date", type=str, default="", help="inclusive end date for multi-stock filtering")
+    parser.add_argument("--train_start_date", type=str, default="", help="inclusive start date for train samples")
+    parser.add_argument("--train_end_date", type=str, default="", help="inclusive end date for train samples")
+    parser.add_argument("--val_start_date", type=str, default="", help="inclusive start date for validation samples")
+    parser.add_argument("--val_end_date", type=str, default="", help="inclusive end date for validation samples")
     parser.add_argument("--trainval_start_date", type=str, default="", help="inclusive start date for train/val samples")
     parser.add_argument("--trainval_end_date", type=str, default="", help="inclusive end date for train/val samples")
     parser.add_argument("--test_start_date", type=str, default="", help="inclusive start date for test samples")
     parser.add_argument("--test_end_date", type=str, default="", help="inclusive end date for test samples")
     parser.add_argument("--val_ratio", type=float, default=0.1, help="chronological validation ratio within train/val range")
+    parser.add_argument("--embedding_tag", type=str, default="", help="optional subdirectory tag for saved embeddings")
     return parser.parse_args()
 
 def get_dataset(root_path, data_path, flag, input_len, output_len, freq, args):
@@ -60,11 +65,16 @@ def get_dataset(root_path, data_path, flag, input_len, output_len, freq, args):
             target_horizon=args.target_horizon,
             start_date=args.start_date or None,
             end_date=args.end_date or None,
+            train_start_date=args.train_start_date or None,
+            train_end_date=args.train_end_date or None,
+            val_start_date=args.val_start_date or None,
+            val_end_date=args.val_end_date or None,
             trainval_start_date=args.trainval_start_date or None,
             trainval_end_date=args.trainval_end_date or None,
             test_start_date=args.test_start_date or None,
             test_end_date=args.test_end_date or None,
             val_ratio=args.val_ratio,
+            embedding_tag=args.embedding_tag or "",
         )
     dataset_class = datasets.get(data_path, Dataset_Custom)
     return dataset_class(root_path=root_path, flag=flag, size=[input_len, 0, output_len], data_path=data_path, freq=freq)
@@ -108,8 +118,7 @@ def save_embeddings(args):
     ).to(device)
 
     # 核心修复：确保路径逻辑与 data_loader_emb.py 一致，只取文件名
-    data_name = os.path.basename(args.data_path).replace('.csv', '')
-    save_path = f"./Embeddings/{data_name}/{args.divide}/"
+    save_path = resolve_embedding_dir(args.data_path, args.divide, embedding_tag=args.embedding_tag or "")
     os.makedirs(save_path, exist_ok=True)
 
     emb_time_path = f"./Results/emb_logs/"
@@ -124,7 +133,7 @@ def save_embeddings(args):
         
         batch_size = embeddings.shape[0]
         for b in range(batch_size):
-            file_stem = f"{save_path}{count}"
+            file_stem = os.path.join(save_path, str(count))
             save_data = embeddings[b].cpu().numpy()
             _save_embedding_file(file_stem, save_data)
             count += 1

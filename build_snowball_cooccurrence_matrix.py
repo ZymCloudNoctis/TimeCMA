@@ -1,9 +1,11 @@
 import argparse
 import csv
 import gzip
+import math
 import os
 import re
 import sys
+from datetime import date
 from itertools import combinations
 
 csv.field_size_limit(sys.maxsize)
@@ -17,6 +19,18 @@ def parse_args():
     parser.add_argument("--output_csv", required=True, help="output matrix csv")
     parser.add_argument("--start_date", default="", help="inclusive start date in YYYY-MM-DD")
     parser.add_argument("--end_date", default="", help="inclusive end date in YYYY-MM-DD")
+    parser.add_argument(
+        "--time_decay",
+        default="none",
+        choices=["none", "exp"],
+        help="optional time-decay weighting for each news item",
+    )
+    parser.add_argument(
+        "--decay_half_life_days",
+        type=float,
+        default=60.0,
+        help="half-life in days for exponential time decay",
+    )
     return parser.parse_args()
 
 
@@ -75,10 +89,32 @@ def parse_stock_codes(raw_value, valid_codes):
     return parsed
 
 
-def build_matrix(input_csv, codes, start_date="", end_date=""):
+def parse_publish_date(raw_value):
+    text = (raw_value or "").strip()
+    if not text:
+        return None
+    return date.fromisoformat(text)
+
+
+def row_weight(current_date, reference_end_date, time_decay, decay_half_life_days):
+    if time_decay == "none":
+        return 1.0
+    if reference_end_date is None:
+        return 1.0
+    if decay_half_life_days <= 0:
+        raise ValueError(f"decay_half_life_days must be positive, got {decay_half_life_days}")
+    day_gap = max((reference_end_date - current_date).days, 0)
+    return math.pow(0.5, day_gap / decay_half_life_days)
+
+
+def build_matrix(input_csv, codes, start_date="", end_date="", time_decay="none", decay_half_life_days=60.0):
     code_set = set(codes)
     code_to_idx = {code: idx for idx, code in enumerate(codes)}
-    matrix = [[0] * len(codes) for _ in codes]
+    matrix = [[0.0] * len(codes) for _ in codes]
+    window_start = date.fromisoformat(start_date) if start_date else None
+    window_end = date.fromisoformat(end_date) if end_date else None
+    if time_decay != "none" and window_end is None:
+        raise ValueError("time_decay requires --end_date so recency can be computed consistently.")
 
     stats = {
         "total_rows": 0,
@@ -90,6 +126,7 @@ def build_matrix(input_csv, codes, start_date="", end_date=""):
         "ignored_unknown_codes": set(),
         "window_min_date": "",
         "window_max_date": "",
+        "total_pair_weight": 0.0,
     }
 
     with open_csv(input_csv) as handle:
@@ -101,20 +138,22 @@ def build_matrix(input_csv, codes, start_date="", end_date=""):
 
         for row in reader:
             stats["total_rows"] += 1
-            publish_date = (row.get("publish_date") or "").strip()
-            if start_date and publish_date and publish_date < start_date:
+            publish_date_text = (row.get("publish_date") or "").strip()
+            publish_date = parse_publish_date(publish_date_text) if publish_date_text else None
+            if window_start is not None and publish_date is not None and publish_date < window_start:
                 stats["rows_outside_window"] += 1
                 continue
-            if end_date and publish_date and publish_date > end_date:
+            if window_end is not None and publish_date is not None and publish_date > window_end:
                 stats["rows_outside_window"] += 1
                 continue
 
             stats["rows_in_window"] += 1
-            if publish_date:
-                if not stats["window_min_date"] or publish_date < stats["window_min_date"]:
-                    stats["window_min_date"] = publish_date
-                if not stats["window_max_date"] or publish_date > stats["window_max_date"]:
-                    stats["window_max_date"] = publish_date
+            if publish_date is not None:
+                publish_text = publish_date.isoformat()
+                if not stats["window_min_date"] or publish_text < stats["window_min_date"]:
+                    stats["window_min_date"] = publish_text
+                if not stats["window_max_date"] or publish_text > stats["window_max_date"]:
+                    stats["window_max_date"] = publish_text
 
             raw_codes = (row.get("stock_codes") or "").split(",")
             for raw_code in raw_codes:
@@ -132,11 +171,18 @@ def build_matrix(input_csv, codes, start_date="", end_date=""):
                 continue
 
             stats["rows_with_pairs"] += 1
+            weight = row_weight(
+                current_date=publish_date if publish_date is not None else window_end,
+                reference_end_date=window_end,
+                time_decay=time_decay,
+                decay_half_life_days=decay_half_life_days,
+            )
             for left_code, right_code in combinations(parsed_codes, 2):
                 left_idx = code_to_idx[left_code]
                 right_idx = code_to_idx[right_code]
-                matrix[left_idx][right_idx] += 1
-                matrix[right_idx][left_idx] += 1
+                matrix[left_idx][right_idx] += weight
+                matrix[right_idx][left_idx] += weight
+                stats["total_pair_weight"] += 2.0 * weight
 
     stats["ignored_unknown_codes"] = sorted(stats["ignored_unknown_codes"])
     return matrix, stats
@@ -160,15 +206,21 @@ def main():
         codes=codes,
         start_date=args.start_date,
         end_date=args.end_date,
+        time_decay=args.time_decay,
+        decay_half_life_days=args.decay_half_life_days,
     )
     write_matrix(args.output_csv, codes, matrix)
 
     print(f"Saved matrix to: {args.output_csv}")
     print(f"Stocks in matrix: {len(codes)}")
+    print(f"Time decay: {args.time_decay}")
+    if args.time_decay != "none":
+        print(f"Decay half life days: {args.decay_half_life_days}")
     print(f"Rows scanned: {stats['total_rows']}")
     print(f"Rows in date window: {stats['rows_in_window']}")
     print(f"Rows with valid stock codes: {stats['rows_with_valid_codes']}")
     print(f"Rows contributing co-occurrence pairs: {stats['rows_with_pairs']}")
+    print(f"Total pair weight: {stats['total_pair_weight']:.6f}")
     print(f"Rows without valid stock codes: {stats['rows_without_valid_codes']}")
     print(f"Rows outside date window: {stats['rows_outside_window']}")
     print(f"Window min date: {stats['window_min_date']}")

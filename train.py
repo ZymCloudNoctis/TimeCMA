@@ -1,4 +1,5 @@
 import argparse
+import json
 import os
 import random
 import time
@@ -20,6 +21,7 @@ from utils.graph_utils import (
     resolve_data_path,
 )
 from utils.metrics import MAE, metric, rank_ic
+from utils.metrics import stock_prediction_stats
 
 import faulthandler
 
@@ -38,11 +40,17 @@ def parse_args():
     parser.add_argument("--stock_pool_file", type=str, default="", help="ordered stock pool file for multi-stock tasks")
     parser.add_argument("--start_date", type=str, default="", help="inclusive start date for multi-stock filtering")
     parser.add_argument("--end_date", type=str, default="", help="inclusive end date for multi-stock filtering")
+    parser.add_argument("--train_start_date", type=str, default="", help="inclusive start date for train samples")
+    parser.add_argument("--train_end_date", type=str, default="", help="inclusive end date for train samples")
+    parser.add_argument("--val_start_date", type=str, default="", help="inclusive start date for validation samples")
+    parser.add_argument("--val_end_date", type=str, default="", help="inclusive end date for validation samples")
     parser.add_argument("--trainval_start_date", type=str, default="", help="inclusive start date for train/val samples")
     parser.add_argument("--trainval_end_date", type=str, default="", help="inclusive end date for train/val samples")
     parser.add_argument("--test_start_date", type=str, default="", help="inclusive start date for test samples")
     parser.add_argument("--test_end_date", type=str, default="", help="inclusive end date for test samples")
     parser.add_argument("--val_ratio", type=float, default=0.1, help="chronological validation ratio within train/val range")
+    parser.add_argument("--embedding_tag", type=str, default="", help="optional subdirectory tag for precomputed embeddings")
+    parser.add_argument("--run_tag", type=str, default="", help="optional subdirectory tag for checkpoints and results")
     parser.add_argument("--channel", type=int, default=32, help="hidden size for stock/node representations")
     parser.add_argument("--num_nodes", type=int, default=7, help="number of nodes")
     parser.add_argument("--input_features", type=int, default=1, help="number of per-node input features")
@@ -74,6 +82,27 @@ def parse_args():
     parser.add_argument("--graph_min_weight", type=int, default=1, help="minimum edge weight kept in the graph")
     parser.add_argument("--graph_steps", type=int, default=1, help="number of graph propagation steps")
     parser.add_argument("--graph_alpha", type=float, default=0.5, help="initial residual mixing weight for graph propagation")
+    parser.add_argument(
+        "--graph_weight_transform",
+        type=str,
+        default="none",
+        choices=["none", "log1p"],
+        help="optional transformation applied to graph weights before normalization",
+    )
+    parser.add_argument("--graph_top_k", type=int, default=0, help="keep only top-k neighbors per node in the graph")
+    parser.add_argument(
+        "--graph_time_decay",
+        type=str,
+        default="none",
+        choices=["none", "exp"],
+        help="metadata field used to record how the graph was constructed",
+    )
+    parser.add_argument(
+        "--graph_decay_half_life_days",
+        type=float,
+        default=0.0,
+        help="metadata field used to record the graph time-decay half life",
+    )
     parser.add_argument("--seed", type=int, default=2024, help="random seed")
     parser.add_argument(
         "--es_patience",
@@ -177,11 +206,16 @@ def load_data(args):
             target_horizon=args.target_horizon,
             start_date=args.start_date or None,
             end_date=args.end_date or None,
+            train_start_date=args.train_start_date or None,
+            train_end_date=args.train_end_date or None,
+            val_start_date=args.val_start_date or None,
+            val_end_date=args.val_end_date or None,
             trainval_start_date=args.trainval_start_date or None,
             trainval_end_date=args.trainval_end_date or None,
             test_start_date=args.test_start_date or None,
             test_end_date=args.test_end_date or None,
             val_ratio=args.val_ratio,
+            embedding_tag=args.embedding_tag or "",
         )
         train_set = MultiStockEmbeddingDataset(flag="train", **dataset_kwargs)
         val_set = MultiStockEmbeddingDataset(flag="val", **dataset_kwargs)
@@ -284,7 +318,12 @@ def prepare_graph(args):
     if not os.path.exists(graph_file):
         raise FileNotFoundError(f"Graph file not found: {graph_file}")
 
-    graph_adjacency = load_graph_adjacency(graph_file, node_columns=node_columns)
+    graph_adjacency = load_graph_adjacency(
+        graph_file,
+        node_columns=node_columns,
+        weight_transform=args.graph_weight_transform,
+        top_k=args.graph_top_k,
+    )
     return graph_adjacency, graph_file
 
 
@@ -345,7 +384,9 @@ def collect_predictions(engine, data_loader, device):
 def summarize_predictions(preds, trues, task_name):
     if task_name == "multistock":
         mse, mae = metric(preds, trues)
-        return {"mse": mse, "mae": mae, "rank_ic": rank_ic(preds, trues).item()}
+        stats = stock_prediction_stats(preds, trues)
+        stats.update({"mse": mse, "mae": mae})
+        return stats
 
     amse = []
     amae = []
@@ -358,7 +399,10 @@ def summarize_predictions(preds, trues, task_name):
 
 def result_path_from_args(args):
     data_name = os.path.basename(args.data_path).replace(".csv", "")
-    return os.path.join("./results/", data_name)
+    result_path = os.path.join("./results/", data_name)
+    if args.run_tag:
+        result_path = os.path.join(result_path, args.run_tag)
+    return result_path
 
 
 def main():
@@ -372,9 +416,11 @@ def main():
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     data_name = os.path.basename(args.data_path).replace(".csv", "")
 
+    save_root = os.path.join(args.save, data_name)
+    if args.run_tag:
+        save_root = os.path.join(save_root, args.run_tag)
     save_root = os.path.join(
-        args.save,
-        data_name,
+        save_root,
         f"{args.task_name}_{args.seq_len}_{args.target_horizon if args.task_name == 'multistock' else args.pred_len}"
         f"_{args.channel}_{args.e_layer}_{args.d_layer}_{args.learning_rate}_{args.dropout_n}_{args.seed}",
     )
@@ -472,14 +518,51 @@ def main():
     os.makedirs(res_path, exist_ok=True)
     np.save(os.path.join(res_path, "preds.npy"), test_pre.numpy())
     np.save(os.path.join(res_path, "trues.npy"), test_real.numpy())
+    metrics_payload = {
+        "task_name": args.task_name,
+        "data_path": args.data_path,
+        "stock_pool_file": args.stock_pool_file,
+        "graph_file": graph_file or "",
+        "graph_weight_transform": args.graph_weight_transform,
+        "graph_top_k": args.graph_top_k,
+        "graph_time_decay": args.graph_time_decay,
+        "graph_decay_half_life_days": args.graph_decay_half_life_days,
+        "embedding_tag": args.embedding_tag,
+        "run_tag": args.run_tag,
+        "seq_len": args.seq_len,
+        "target_horizon": args.target_horizon if args.task_name == "multistock" else args.pred_len,
+        "num_nodes": args.num_nodes,
+        "input_features": args.input_features,
+        "train_samples": len(train_set),
+        "val_samples": len(val_set),
+        "test_samples": len(test_set),
+        "best_epoch": best_epoch,
+        "best_val_loss": float(best_val_loss),
+        "test_mse": float(summary["mse"]),
+        "test_mae": float(summary["mae"]),
+    }
     if args.task_name == "multistock":
-        np.save(os.path.join(res_path, "stock_codes.npy"), np.array(test_set.stock_codes, dtype=object))
+        np.save(os.path.join(res_path, "stock_codes.npy"), np.array(test_set.stock_codes, dtype=str))
+        np.save(os.path.join(res_path, "target_dates.npy"), np.array(test_set.sample_target_dates, dtype=str))
+        metrics_payload.update(
+            {
+                "test_ic": float(summary["ic"]),
+                "test_ic_std": float(summary["ic_std"]),
+                "test_icir": float(summary["icir"]),
+                "test_rank_ic": float(summary["rank_ic"]),
+                "test_rank_ic_std": float(summary["rank_ic_std"]),
+                "test_rank_icir": float(summary["rank_icir"]),
+            }
+        )
         print(
             f"Test MSE: {summary['mse']:.4f}, Test MAE: {summary['mae']:.4f}, "
-            f"Test RankIC: {summary['rank_ic']:.4f}"
+            f"Test IC: {summary['ic']:.4f}, Test RankIC: {summary['rank_ic']:.4f}, "
+            f"Test ICIR: {summary['icir']:.4f}, Test RankICIR: {summary['rank_icir']:.4f}"
         )
     else:
         print(f"On average horizons, Test MSE: {summary['mse']:.4f}, Test MAE: {summary['mae']:.4f}")
+    with open(os.path.join(res_path, "metrics.json"), "w", encoding="utf-8") as handle:
+        json.dump(metrics_payload, handle, indent=2, ensure_ascii=False)
     print(f"测试结果已保存至: {res_path}")
 
 

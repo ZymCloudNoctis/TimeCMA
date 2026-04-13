@@ -58,6 +58,29 @@ def load_stock_pool(stock_pool_file):
     return ordered_codes
 
 
+def _apply_top_k_filter(matrix, top_k):
+    top_k = int(top_k)
+    if top_k <= 0 or matrix.shape[0] <= 1:
+        return matrix
+
+    filtered = np.zeros_like(matrix, dtype=np.float32)
+    for row_idx in range(matrix.shape[0]):
+        row = matrix[row_idx].copy()
+        row[row_idx] = 0.0
+        positive_indices = np.flatnonzero(row > 0)
+        if len(positive_indices) <= top_k:
+            filtered[row_idx, positive_indices] = row[positive_indices]
+            continue
+        candidate_values = row[positive_indices]
+        top_positions = np.argpartition(candidate_values, -top_k)[-top_k:]
+        keep_indices = positive_indices[top_positions]
+        filtered[row_idx, keep_indices] = row[keep_indices]
+
+    filtered = np.maximum(filtered, filtered.T)
+    np.fill_diagonal(filtered, 0.0)
+    return filtered
+
+
 def infer_node_columns(data_file, time_col="date"):
     df = pd.read_csv(data_file, nrows=1)
     return [column for column in df.columns if column != time_col]
@@ -167,7 +190,7 @@ def build_and_save_cooccurrence_graph(
     return save_path, node_columns
 
 
-def load_graph_adjacency(graph_file, node_columns, add_self_loops=True):
+def load_graph_adjacency(graph_file, node_columns, add_self_loops=True, weight_transform="none", top_k=0):
     graph_df = pd.read_csv(graph_file, index_col=0)
     graph_df.index = [normalize_stock_code(value) for value in graph_df.index]
     graph_df.columns = [normalize_stock_code(value) for value in graph_df.columns]
@@ -180,6 +203,14 @@ def load_graph_adjacency(graph_file, node_columns, add_self_loops=True):
     matrix = graph_df.to_numpy(dtype=np.float32)
     matrix = np.maximum(matrix, 0.0)
     matrix = 0.5 * (matrix + matrix.T)
+    np.fill_diagonal(matrix, 0.0)
+
+    if weight_transform == "log1p":
+        matrix = np.log1p(matrix)
+    elif weight_transform != "none":
+        raise ValueError(f"Unsupported graph weight transform: {weight_transform}")
+
+    matrix = _apply_top_k_filter(matrix, top_k=top_k)
 
     if add_self_loops:
         matrix = matrix + np.eye(len(node_columns), dtype=np.float32)

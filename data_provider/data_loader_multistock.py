@@ -144,6 +144,10 @@ def _date_based_split_indices(
     seq_len,
     target_horizon,
     flag,
+    train_start_date=None,
+    train_end_date=None,
+    val_start_date=None,
+    val_end_date=None,
     trainval_start_date=None,
     trainval_end_date=None,
     test_start_date=None,
@@ -159,6 +163,54 @@ def _date_based_split_indices(
     dates = pd.DatetimeIndex(date_index)
     anchor_dates = dates[candidate_indices]
     future_dates = dates[candidate_indices + target_horizon]
+
+    explicit_train_val_split = any(value for value in [train_start_date, train_end_date, val_start_date, val_end_date])
+    if explicit_train_val_split:
+        required = {
+            "train_start_date": train_start_date,
+            "train_end_date": train_end_date,
+            "val_start_date": val_start_date,
+            "val_end_date": val_end_date,
+            "test_start_date": test_start_date,
+            "test_end_date": test_end_date,
+        }
+        missing = [name for name, value in required.items() if not value]
+        if missing:
+            raise ValueError(f"Explicit rolling split requires these dates: {missing}")
+
+        train_start = pd.to_datetime(train_start_date)
+        train_end = pd.to_datetime(train_end_date)
+        val_start = pd.to_datetime(val_start_date)
+        val_end = pd.to_datetime(val_end_date)
+        test_start = pd.to_datetime(test_start_date)
+        test_end = pd.to_datetime(test_end_date)
+
+        train_indices = candidate_indices[
+            (anchor_dates >= train_start) & (anchor_dates <= train_end) & (future_dates <= train_end)
+        ]
+        val_indices = candidate_indices[
+            (anchor_dates >= val_start) & (anchor_dates <= val_end) & (future_dates <= val_end)
+        ]
+        test_indices = candidate_indices[
+            (anchor_dates >= test_start) & (anchor_dates <= test_end) & (future_dates <= test_end)
+        ]
+
+        split_map = {
+            "train": train_indices,
+            "val": val_indices,
+            "test": test_indices,
+        }
+        selected = split_map[flag]
+        if len(train_indices) == 0 or len(val_indices) == 0 or len(test_indices) == 0:
+            raise ValueError(
+                "Explicit rolling split produced an empty split. "
+                f"train=({train_start_date}, {train_end_date}), "
+                f"val=({val_start_date}, {val_end_date}), "
+                f"test=({test_start_date}, {test_end_date})."
+            )
+        if len(selected) == 0:
+            raise ValueError(f"No samples for split '{flag}' in explicit rolling split.")
+        return split_map, train_indices
 
     trainval_start = pd.to_datetime(trainval_start_date) if trainval_start_date else dates.min()
     trainval_end = pd.to_datetime(trainval_end_date) if trainval_end_date else dates.max()
@@ -252,6 +304,13 @@ def _load_embedding_array(file_path):
     raise ValueError(f"Unsupported embedding file format: {file_path}")
 
 
+def resolve_embedding_dir(data_path, flag, embedding_tag=""):
+    data_name = os.path.basename(data_path).replace(".csv", "")
+    if embedding_tag:
+        return os.path.join("./Embeddings", data_name, embedding_tag, flag)
+    return os.path.join("./Embeddings", data_name, flag)
+
+
 class _BaseMultiStockDataset(Dataset):
     def __init__(
         self,
@@ -267,11 +326,16 @@ class _BaseMultiStockDataset(Dataset):
         target_horizon=5,
         start_date=None,
         end_date=None,
+        train_start_date=None,
+        train_end_date=None,
+        val_start_date=None,
+        val_end_date=None,
         trainval_start_date=None,
         trainval_end_date=None,
         test_start_date=None,
         test_end_date=None,
         val_ratio=0.1,
+        embedding_tag="",
     ):
         if size is None:
             self.seq_len, self.label_len, self.pred_len = 60, 0, target_horizon
@@ -292,11 +356,16 @@ class _BaseMultiStockDataset(Dataset):
         self.target_horizon = target_horizon
         self.start_date = pd.to_datetime(start_date) if start_date else None
         self.end_date = pd.to_datetime(end_date) if end_date else None
+        self.train_start_date = train_start_date
+        self.train_end_date = train_end_date
+        self.val_start_date = val_start_date
+        self.val_end_date = val_end_date
         self.trainval_start_date = trainval_start_date
         self.trainval_end_date = trainval_end_date
         self.test_start_date = test_start_date
         self.test_end_date = test_end_date
         self.val_ratio = val_ratio
+        self.embedding_tag = embedding_tag
         self.scaler = StandardScaler()
         self.feature_names = list(DEFAULT_FEATURE_COLUMNS)
         self.prompt_feature_name = "close"
@@ -304,8 +373,7 @@ class _BaseMultiStockDataset(Dataset):
         self.stock_codes = load_stock_pool(stock_pool_file)
         self.num_nodes = len(self.stock_codes)
         self.num_features = len(self.feature_names)
-        data_name = os.path.basename(data_path).replace(".csv", "")
-        self.embed_path = f"./Embeddings/{data_name}/{flag}/"
+        self.embed_path = resolve_embedding_dir(data_path, flag, embedding_tag=embedding_tag)
         self.__read_data__()
 
     def __read_data__(self):
@@ -342,7 +410,11 @@ class _BaseMultiStockDataset(Dataset):
         feature_panel = np.stack(feature_panels, axis=1)  # [T, N, F]
         close_panel = np.stack(close_panels, axis=1)  # [T, N]
 
-        has_explicit_date_split = any(
+        explicit_train_val_split = any(
+            value
+            for value in [self.train_start_date, self.train_end_date, self.val_start_date, self.val_end_date]
+        )
+        has_explicit_date_split = explicit_train_val_split or any(
             value for value in [self.trainval_start_date, self.trainval_end_date, self.test_start_date, self.test_end_date]
         )
         if has_explicit_date_split:
@@ -351,6 +423,10 @@ class _BaseMultiStockDataset(Dataset):
                 seq_len=self.seq_len,
                 target_horizon=self.target_horizon,
                 flag=self.flag,
+                train_start_date=self.train_start_date,
+                train_end_date=self.train_end_date,
+                val_start_date=self.val_start_date,
+                val_end_date=self.val_end_date,
                 trainval_start_date=self.trainval_start_date,
                 trainval_end_date=self.trainval_end_date,
                 test_start_date=self.test_start_date,
@@ -376,7 +452,10 @@ class _BaseMultiStockDataset(Dataset):
 
         if self.scale:
             scaler_start = 0
-            if self.trainval_start_date:
+            if self.train_start_date:
+                train_start = pd.to_datetime(self.train_start_date)
+                scaler_start = int(np.searchsorted(all_dates.to_numpy(), train_start.to_datetime64(), side="left"))
+            elif self.trainval_start_date:
                 trainval_start = pd.to_datetime(self.trainval_start_date)
                 scaler_start = int(np.searchsorted(all_dates.to_numpy(), trainval_start.to_datetime64(), side="left"))
             scaler_end = train_indices[-1] + 1
@@ -397,6 +476,10 @@ class _BaseMultiStockDataset(Dataset):
         self.data_stamp = _build_time_marks(all_dates, timeenc=self.timeenc)
         self.sample_end_indices = split_map[self.flag].astype(np.int64)
         self.available_length = len(self.sample_end_indices)
+        self.sample_target_dates = np.array(
+            [pd.Timestamp(all_dates[label_index + self.target_horizon]).strftime("%Y-%m-%d") for label_index in self.sample_end_indices],
+            dtype=str,
+        )
 
     def __len__(self):
         return self.available_length
