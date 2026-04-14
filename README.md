@@ -36,38 +36,14 @@ Multivariate time series forecasting (MTSF) aims to learn temporal dynamics amon
 ## Datasets
 Datasets can be obtained from [TimesNet](https://drive.google.com/drive/folders/13Cg1KYOlzM5C7K8gK8NfC-F3EYxkM3D2) and [TFB](https://drive.google.com/file/d/1vgpOmAygokoUt235piWKUjfwao6KwLv7/view).
 
-## Usages
-* ### Last token embedding storage
+## Usage
 
-```bash
-bash Store_{data_name}.sh
-```
+This repo is now organized around the HS300 multi-stock thesis pipeline. The current default workflow is:
 
-* ### Train and inference
-   
-```bash
-bash {data_name}.sh
-```
-
-* ### Co-occurrence graph construction
-
-Build a COGRASP-style co-occurrence graph from the multivariate variables in a TimeCMA dataset:
-
-```bash
-python build_graph.py \
-  --root_path . \
-  --data_path dataset/ETT-small/600519_enriched.csv \
-  --output_path dataset/ETT-small/600519_enriched_cooccurrence_train.csv \
-  --split train \
-  --seq_len 60 \
-  --pred_len 5
-```
-
-The stock `600519` training script now supports `--auto_build_graph` and will automatically create or reuse the graph file before training.
-
-## Multi-Stock Prototype
-
-This repo now includes a multi-stock TimeCMA path where nodes are stocks instead of factor columns.
+1. Clean Snowball source files into a unified CSV
+2. Build a Snowball co-occurrence graph
+3. Generate prompt embeddings
+4. Train a static-graph model or run rolling-window experiments
 
 ### Expected market data format
 
@@ -94,19 +70,24 @@ Provide a stock pool file (`.txt` or `.csv`) whose order is the single source of
 
 Provide your Snowball / COGRASP co-occurrence matrix as a square CSV whose row and column labels match the stock pool codes.
 
-### Generate multi-stock prompt embeddings
+### Clean Snowball data
 
 ```bash
-bash scripts/Store_MultiStock_Prototype.sh
+python clean_snowball_xlsx.py \
+  --input_dir /absolute/path/to/raw_xlsx_dir \
+  --output_csv dataset/Snowball/snowball_posts_clean_2011_2025.csv.gz
 ```
 
-### Train the multi-stock model
+### Build a HS300 co-occurrence graph
 
 ```bash
-bash scripts/MultiStock_Prototype.sh
+python build_snowball_cooccurrence_matrix.py \
+  --input_csv dataset/Snowball/snowball_posts_clean_2011_2025.csv.gz \
+  --stock_pool_file dataset/HS300/stock_pool.csv \
+  --output_csv dataset/HS300/hs300_news_cooccurrence_2024-01-01_2025-05-31.csv \
+  --start_date 2024-01-01 \
+  --end_date 2025-05-31
 ```
-
-The multi-stock training path predicts future `target_horizon`-day returns per stock and reports `MSE`, `MAE`, and cross-sectional `RankIC`.
 
 ### HS300 + Snowball static graph
 

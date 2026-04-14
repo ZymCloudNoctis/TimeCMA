@@ -6,8 +6,6 @@ import pandas as pd
 import torch
 
 
-ETT_HOUR_DATASETS = {"ETTh1", "ETTh2"}
-ETT_MINUTE_DATASETS = {"ETTm1", "ETTm2"}
 STOCK_CODE_PATTERN = re.compile(r"(\d{6})")
 
 
@@ -47,11 +45,10 @@ def load_stock_pool(stock_pool_file):
     seen = set()
     for code in codes:
         code = normalize_stock_code(code)
-        if not code:
+        if not code or code in seen:
             continue
-        if code not in seen:
-            ordered_codes.append(code)
-            seen.add(code)
+        ordered_codes.append(code)
+        seen.add(code)
 
     if not ordered_codes:
         raise ValueError(f"Stock pool file is empty: {stock_pool_path}")
@@ -71,6 +68,7 @@ def _apply_top_k_filter(matrix, top_k):
         if len(positive_indices) <= top_k:
             filtered[row_idx, positive_indices] = row[positive_indices]
             continue
+
         candidate_values = row[positive_indices]
         top_positions = np.argpartition(candidate_values, -top_k)[-top_k:]
         keep_indices = positive_indices[top_positions]
@@ -81,126 +79,17 @@ def _apply_top_k_filter(matrix, top_k):
     return filtered
 
 
-def infer_node_columns(data_file, time_col="date"):
-    df = pd.read_csv(data_file, nrows=1)
-    return [column for column in df.columns if column != time_col]
-
-
-def default_graph_output_path(root_path, data_path, split="train"):
-    data_file = resolve_data_path(root_path, data_path)
-    stem, _ = os.path.splitext(data_file)
-    return f"{stem}_cooccurrence_{split}.csv"
-
-
-def _slice_dataframe(df, data_name, split, seq_len, pred_len):
-    if split == "all":
-        return df.copy()
-
-    total = len(df)
-    if data_name in ETT_HOUR_DATASETS:
-        border1s = [0, 12 * 30 * 24 - seq_len, 12 * 30 * 24 + 4 * 30 * 24 - seq_len]
-        border2s = [12 * 30 * 24, 12 * 30 * 24 + 4 * 30 * 24, 12 * 30 * 24 + 8 * 30 * 24]
-    elif data_name in ETT_MINUTE_DATASETS:
-        border1s = [0, 12 * 30 * 24 * 4 - seq_len, 12 * 30 * 24 * 4 + 4 * 30 * 24 * 4 - seq_len]
-        border2s = [12 * 30 * 24 * 4, 12 * 30 * 24 * 4 + 4 * 30 * 24 * 4, 12 * 30 * 24 * 4 + 8 * 30 * 24 * 4]
-    else:
-        num_train = int(total * 0.7)
-        num_test = int(total * 0.2)
-        num_val = total - num_train - num_test
-        border1s = [0, num_train - seq_len, total - num_test - seq_len]
-        border2s = [num_train, num_train + num_val, total]
-
-    split_to_index = {"train": 0, "val": 1, "test": 2}
-    start = max(0, border1s[split_to_index[split]])
-    end = min(total, border2s[split_to_index[split]])
-    return df.iloc[start:end].copy()
-
-
-def _series_event_signal(series, column_name, target="OT"):
-    values = pd.to_numeric(series, errors="coerce").astype(float)
-    name = column_name.lower()
-
-    if column_name == target:
-        signal = values.pct_change()
-    elif "vol" in name or "amount" in name:
-        signal = np.log1p(values.clip(lower=0)).diff()
-    elif "pct" in name or "change" in name:
-        signal = values
-    elif any(token in name for token in ("rsi", "kdj", "turnover", "macd", "boll")):
-        signal = values.diff()
-    else:
-        signal = values.pct_change()
-
-    return signal.replace([np.inf, -np.inf], 0).fillna(0.0)
-
-
-def build_cooccurrence_matrix(
-    df,
-    node_columns,
-    target="OT",
-    event_threshold=0.5,
-    min_weight=1,
-):
-    signal_frame = pd.DataFrame(
-        {column: _series_event_signal(df[column], column_name=column, target=target) for column in node_columns}
-    ).fillna(0.0)
-
-    std = signal_frame.std(axis=0).replace(0, np.nan)
-    normalized = signal_frame.divide(std, axis=1).replace([np.inf, -np.inf], 0).fillna(0.0)
-    states = np.where(normalized.values >= event_threshold, 1, np.where(normalized.values <= -event_threshold, -1, 0))
-
-    up_mask = (states == 1).astype(np.int32)
-    down_mask = (states == -1).astype(np.int32)
-    cooccurrence = up_mask.T @ up_mask + down_mask.T @ down_mask
-
-    matrix = pd.DataFrame(cooccurrence, index=node_columns, columns=node_columns, dtype=np.int32)
-    np.fill_diagonal(matrix.values, 0)
-    if min_weight > 1:
-        matrix = matrix.where(matrix >= min_weight, 0)
-    return matrix
-
-
-def build_and_save_cooccurrence_graph(
-    root_path,
-    data_path,
-    output_path=None,
-    split="train",
-    seq_len=96,
-    pred_len=96,
-    target="OT",
-    event_threshold=0.5,
-    min_weight=1,
-):
-    data_file = resolve_data_path(root_path, data_path)
-    df = pd.read_csv(data_file)
-    data_name = os.path.splitext(os.path.basename(data_file))[0]
-    node_columns = [column for column in df.columns if column != "date"]
-    sliced_df = _slice_dataframe(df, data_name=data_name, split=split, seq_len=seq_len, pred_len=pred_len)
-    matrix = build_cooccurrence_matrix(
-        sliced_df,
-        node_columns=node_columns,
-        target=target,
-        event_threshold=event_threshold,
-        min_weight=min_weight,
-    )
-
-    save_path = os.path.abspath(output_path or default_graph_output_path(root_path, data_path, split=split))
-    os.makedirs(os.path.dirname(save_path), exist_ok=True)
-    matrix.to_csv(save_path)
-    return save_path, node_columns
-
-
 def load_graph_adjacency(graph_file, node_columns, add_self_loops=True, weight_transform="none", top_k=0):
     graph_df = pd.read_csv(graph_file, index_col=0)
     graph_df.index = [normalize_stock_code(value) for value in graph_df.index]
     graph_df.columns = [normalize_stock_code(value) for value in graph_df.columns]
     node_columns = [normalize_stock_code(column) for column in node_columns]
+
     missing_columns = [column for column in node_columns if column not in graph_df.columns or column not in graph_df.index]
     if missing_columns:
         raise ValueError(f"Graph file {graph_file} is missing node columns: {missing_columns}")
 
-    graph_df = graph_df.loc[node_columns, node_columns]
-    matrix = graph_df.to_numpy(dtype=np.float32)
+    matrix = graph_df.loc[node_columns, node_columns].to_numpy(dtype=np.float32)
     matrix = np.maximum(matrix, 0.0)
     matrix = 0.5 * (matrix + matrix.T)
     np.fill_diagonal(matrix, 0.0)

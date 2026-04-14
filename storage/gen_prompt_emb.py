@@ -8,15 +8,15 @@ from transformers import GPT2Model, GPT2Tokenizer
 class GenPromptEmb(nn.Module):
     def __init__(
         self,
-        data_path="FRED",
+        data_path="dataset/HS300/all_stocks_complete_data.csv",
         model_name="gpt2",
         device="cuda:0",
-        input_len=96,
+        input_len=60,
         d_model=768,
         layer=12,
         divide="train",
-        freq="h",
-        task_name="legacy",
+        freq="d",
+        task_name="multistock",
         stock_codes=None,
         prompt_feature_index=0,
     ):
@@ -52,22 +52,6 @@ class GenPromptEmb(nn.Module):
             return f"{year:04d}-{month:02d}-{day:02d} {hour:02d}:00"
         return f"{year:04d}-{month:02d}-{day:02d} {hour:02d}:{minute:02d}"
 
-    def _legacy_prompt(self, in_data, in_data_mark, sample_index, node_index):
-        values = in_data[sample_index, :, node_index].flatten().tolist()
-        values_str = ", ".join([f"{value:.4f}" for value in values])
-        trend_value = torch.sum(torch.diff(in_data[sample_index, :, node_index].flatten()))
-        start_date = self._format_datetime(in_data_mark, sample_index, 0)
-        end_date = self._format_datetime(in_data_mark, sample_index, self.last_index)
-        frequency_text = {
-            "d": "day",
-            "h": "hour",
-            "t": "15 minutes",
-        }.get(self.freq, "time step")
-        return (
-            f"From {start_date} to {end_date}, the values were {values_str} every {frequency_text}. "
-            f"The total trend value was {trend_value.item():.4f}"
-        )
-
     def _multistock_prompt(self, in_data, in_data_mark, sample_index, node_index):
         values = in_data[sample_index, :, node_index, self.prompt_feature_index].flatten().tolist()
         values_str = ", ".join([f"{value:.4f}" for value in values])
@@ -81,10 +65,7 @@ class GenPromptEmb(nn.Module):
         )
 
     def _prepare_prompt(self, in_data, in_data_mark, sample_index, node_index):
-        if in_data.dim() == 4 or self.task_name == "multistock":
-            prompt = self._multistock_prompt(in_data, in_data_mark, sample_index, node_index)
-        else:
-            prompt = self._legacy_prompt(in_data, in_data_mark, sample_index, node_index)
+        prompt = self._multistock_prompt(in_data, in_data_mark, sample_index, node_index)
         return self.tokenizer.encode(prompt, return_tensors="pt").to(self.device)
 
     def forward(self, tokenized_prompt):
@@ -93,12 +74,9 @@ class GenPromptEmb(nn.Module):
         return prompt_embeddings
 
     def generate_embeddings(self, in_data, in_data_mark):
-        if in_data.dim() == 4:
-            batch_size, _, num_nodes, _ = in_data.shape
-        elif in_data.dim() == 3:
-            batch_size, _, num_nodes = in_data.shape
-        else:
-            raise ValueError(f"Unsupported input shape for prompt generation: {tuple(in_data.shape)}")
+        if in_data.dim() != 4:
+            raise ValueError(f"Multi-stock prompt generation expects [B, L, N, F], got {tuple(in_data.shape)}")
+        batch_size, _, num_nodes, _ = in_data.shape
 
         tokenized_prompts = []
         max_token_count = 0
