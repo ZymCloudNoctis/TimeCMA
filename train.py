@@ -49,6 +49,8 @@ def parse_args():
     parser.add_argument("--test_start_date", type=str, default="", help="inclusive start date for test samples")
     parser.add_argument("--test_end_date", type=str, default="", help="inclusive end date for test samples")
     parser.add_argument("--val_ratio", type=float, default=0.1, help="chronological validation ratio within train/val range")
+    parser.add_argument("--target_winsorize_lower", type=float, default=0.0, help="lower quantile for train-label winsorization")
+    parser.add_argument("--target_winsorize_upper", type=float, default=1.0, help="upper quantile for train-label winsorization")
     parser.add_argument("--embedding_tag", type=str, default="", help="optional subdirectory tag for precomputed embeddings")
     parser.add_argument("--run_tag", type=str, default="", help="optional subdirectory tag for checkpoints and results")
     parser.add_argument("--channel", type=int, default=32, help="hidden size for stock/node representations")
@@ -215,6 +217,8 @@ def load_data(args):
             test_start_date=args.test_start_date or None,
             test_end_date=args.test_end_date or None,
             val_ratio=args.val_ratio,
+            target_winsorize_lower=args.target_winsorize_lower,
+            target_winsorize_upper=args.target_winsorize_upper,
             embedding_tag=args.embedding_tag or "",
         )
         train_set = MultiStockEmbeddingDataset(flag="train", **dataset_kwargs)
@@ -527,6 +531,8 @@ def main():
         "graph_top_k": args.graph_top_k,
         "graph_time_decay": args.graph_time_decay,
         "graph_decay_half_life_days": args.graph_decay_half_life_days,
+        "target_winsorize_lower": args.target_winsorize_lower,
+        "target_winsorize_upper": args.target_winsorize_upper,
         "embedding_tag": args.embedding_tag,
         "run_tag": args.run_tag,
         "seq_len": args.seq_len,

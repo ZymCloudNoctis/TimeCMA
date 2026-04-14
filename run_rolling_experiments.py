@@ -44,6 +44,8 @@ def parse_args():
     parser.add_argument("--graph_top_k", type=int, default=10)
     parser.add_argument("--dynamic_time_decay", default="exp", choices=["none", "exp"])
     parser.add_argument("--dynamic_decay_half_life_days", type=float, default=60.0)
+    parser.add_argument("--target_winsorize_lower", type=float, default=0.01)
+    parser.add_argument("--target_winsorize_upper", type=float, default=0.99)
     parser.add_argument("--num_workers", type=int, default=10)
     parser.add_argument("--seed", type=int, default=2024)
     parser.add_argument("--python_bin", default=sys.executable)
@@ -129,10 +131,17 @@ def graph_build_signature(args, method):
 
 
 def result_signature(args, method):
+    winsorize_signature = (
+        "tw-none"
+        if args.target_winsorize_lower <= 0.0 and args.target_winsorize_upper >= 1.0
+        else f"tw-{normalize_number_token(args.target_winsorize_lower)}-{normalize_number_token(args.target_winsorize_upper)}"
+    )
+
     if method == "no_graph":
-        return "plain"
+        return winsorize_signature
 
     parts = [
+        winsorize_signature,
         f"gw-{args.graph_weight_transform}",
         f"topk-{args.graph_top_k}",
     ]
@@ -162,6 +171,10 @@ def dump_json(path, payload):
 
 
 def is_stale_metrics(metrics, args, method, runtime_graph):
+    if float((metrics or {}).get("target_winsorize_lower", 0.0)) != float(args.target_winsorize_lower):
+        return True
+    if float((metrics or {}).get("target_winsorize_upper", 1.0)) != float(args.target_winsorize_upper):
+        return True
     if method == "no_graph":
         return False
     graph_file = (metrics or {}).get("graph_file", "")
@@ -374,6 +387,10 @@ def run_training(args, repo_root, window, method, stock_pool_runtime, embedding_
         window["test_start_date"],
         "--test_end_date",
         window["test_end_date"],
+        "--target_winsorize_lower",
+        str(args.target_winsorize_lower),
+        "--target_winsorize_upper",
+        str(args.target_winsorize_upper),
         "--batch_size",
         str(args.batch_size),
         "--freq",
@@ -489,6 +506,8 @@ def summarize_results(repo_root, market_data, rows):
         "graph_top_k",
         "graph_time_decay",
         "graph_decay_half_life_days",
+        "target_winsorize_lower",
+        "target_winsorize_upper",
         "graph_source_file",
         "graph_file",
         "stock_pool_file",
@@ -588,6 +607,8 @@ def main():
                         "graph_decay_half_life_days",
                         0.0 if method != "dynamic6m" else args.dynamic_decay_half_life_days,
                     ),
+                    "target_winsorize_lower": metrics.get("target_winsorize_lower", args.target_winsorize_lower),
+                    "target_winsorize_upper": metrics.get("target_winsorize_upper", args.target_winsorize_upper),
                     "graph_source_file": graph_file,
                     "graph_file": metrics.get("graph_file", graph_file),
                     "stock_pool_file": metrics.get("stock_pool_file", stock_pool_runtime),

@@ -26,6 +26,7 @@ echo "方法: no_graph static dynamic6m"
 echo "测试月份: 2025-04 ~ 2025-09"
 echo "图权重变换: log1p + top-k(10)"
 echo "动态图时间衰减: exp, half-life=60 days"
+echo "训练标签 winsorize: 1% ~ 99%"
 
 "$python_bin" -u run_rolling_experiments.py \
   --market_data "$market_data" \
@@ -36,4 +37,6 @@ echo "动态图时间衰减: exp, half-life=60 days"
   --graph_weight_transform log1p \
   --graph_top_k 10 \
   --dynamic_time_decay exp \
-  --dynamic_decay_half_life_days 60
+  --dynamic_decay_half_life_days 60 \
+  --target_winsorize_lower 0.01 \
+  --target_winsorize_upper 0.99

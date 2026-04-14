@@ -35,6 +35,8 @@ trainval_end_date="2025-05-31"
 test_start_date="2025-06-01"
 test_end_date="2025-09-30"
 val_ratio="0.2"
+target_winsorize_lower="0.01"
+target_winsorize_upper="0.99"
 
 if [ ! -f "$canonical_stock_pool_file" ]; then
   echo "Canonical stock pool file not found: $canonical_stock_pool_file"
@@ -70,6 +72,7 @@ echo "全局时间窗口: $start_date ~ $end_date"
 echo "训练/验证窗口: $trainval_start_date ~ $trainval_end_date"
 echo "测试窗口: $test_start_date ~ $test_end_date"
 echo "验证比例: $val_ratio"
+echo "训练标签 winsorize: $target_winsorize_lower ~ $target_winsorize_upper"
 echo "图权重变换: $graph_weight_transform"
 echo "图 top-k: $graph_top_k"
 
@@ -102,6 +105,8 @@ echo "训练日志: $log_file"
   --test_start_date "$test_start_date" \
   --test_end_date "$test_end_date" \
   --val_ratio "$val_ratio" \
+  --target_winsorize_lower "$target_winsorize_lower" \
+  --target_winsorize_upper "$target_winsorize_upper" \
   --batch_size "$batch_size" \
   --freq "$freq" \
   --learning_rate "$learning_rate" \

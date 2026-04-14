@@ -22,6 +22,19 @@ VOLUME_COLUMNS = ["vol", "amount"]
 DEFAULT_FEATURE_COLUMNS = PRICE_COLUMNS + VOLUME_COLUMNS + ["daily_return", "log_return", "amplitude"]
 
 
+def _normalize_winsorize_quantiles(lower, upper):
+    lower = float(lower)
+    upper = float(upper)
+    if lower <= 0.0 and upper >= 1.0:
+        return 0.0, 1.0, False
+    if not 0.0 <= lower < upper <= 1.0:
+        raise ValueError(
+            f"Invalid target winsorize quantiles: lower={lower}, upper={upper}. "
+            "Expected 0 <= lower < upper <= 1."
+        )
+    return lower, upper, True
+
+
 def _find_column(columns, candidates, required=True):
     lowered = {column.lower(): column for column in columns}
     for candidate in candidates:
@@ -336,6 +349,8 @@ class _BaseMultiStockDataset(Dataset):
         test_end_date=None,
         val_ratio=0.1,
         embedding_tag="",
+        target_winsorize_lower=0.0,
+        target_winsorize_upper=1.0,
     ):
         if size is None:
             self.seq_len, self.label_len, self.pred_len = 60, 0, target_horizon
@@ -366,6 +381,11 @@ class _BaseMultiStockDataset(Dataset):
         self.test_end_date = test_end_date
         self.val_ratio = val_ratio
         self.embedding_tag = embedding_tag
+        (
+            self.target_winsorize_lower,
+            self.target_winsorize_upper,
+            self.target_winsorize_enabled,
+        ) = _normalize_winsorize_quantiles(target_winsorize_lower, target_winsorize_upper)
         self.scaler = StandardScaler()
         self.feature_names = list(DEFAULT_FEATURE_COLUMNS)
         self.prompt_feature_name = "close"
@@ -374,6 +394,8 @@ class _BaseMultiStockDataset(Dataset):
         self.num_nodes = len(self.stock_codes)
         self.num_features = len(self.feature_names)
         self.embed_path = resolve_embedding_dir(data_path, flag, embedding_tag=embedding_tag)
+        self.target_clip_lower = None
+        self.target_clip_upper = None
         self.__read_data__()
 
     def __read_data__(self):
@@ -471,6 +493,11 @@ class _BaseMultiStockDataset(Dataset):
                 close_panel[self.target_horizon:] / np.clip(close_panel[:-self.target_horizon], a_min=1e-8, a_max=None)
             ) - 1.0
 
+        if self.target_winsorize_enabled:
+            train_targets = target_returns[train_indices]
+            self.target_clip_lower = np.quantile(train_targets, self.target_winsorize_lower, axis=0).astype(np.float32)
+            self.target_clip_upper = np.quantile(train_targets, self.target_winsorize_upper, axis=0).astype(np.float32)
+
         self.data_x = feature_panel.astype(np.float32)
         self.data_y = target_returns.astype(np.float32)
         self.data_stamp = _build_time_marks(all_dates, timeenc=self.timeenc)
@@ -487,13 +514,19 @@ class _BaseMultiStockDataset(Dataset):
     def _get_target_mark(self, label_index):
         return self.data_stamp[label_index + self.target_horizon]
 
+    def _get_target_values(self, label_index):
+        seq_y = self.data_y[label_index].copy()
+        if self.flag == "train" and self.target_winsorize_enabled:
+            seq_y = np.clip(seq_y, self.target_clip_lower, self.target_clip_upper)
+        return seq_y
+
 
 class MultiStockSaveDataset(_BaseMultiStockDataset):
     def __getitem__(self, index):
         label_index = int(self.sample_end_indices[index])
         s_begin, s_end = label_index - self.seq_len + 1, label_index + 1
         seq_x = self.data_x[s_begin:s_end]
-        seq_y = self.data_y[label_index]
+        seq_y = self._get_target_values(label_index)
         seq_x_mark = self.data_stamp[s_begin:s_end]
         seq_y_mark = self._get_target_mark(label_index)
         return seq_x, seq_y, seq_x_mark, seq_y_mark
@@ -504,7 +537,7 @@ class MultiStockEmbeddingDataset(_BaseMultiStockDataset):
         label_index = int(self.sample_end_indices[index])
         s_begin, s_end = label_index - self.seq_len + 1, label_index + 1
         seq_x = self.data_x[s_begin:s_end]
-        seq_y = self.data_y[label_index]
+        seq_y = self._get_target_values(label_index)
         seq_x_mark = self.data_stamp[s_begin:s_end]
         seq_y_mark = self._get_target_mark(label_index)
 
