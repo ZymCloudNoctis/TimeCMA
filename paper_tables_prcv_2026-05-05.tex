@@ -1,0 +1,88 @@
+% Main comparison table
+\begin{table*}[t]
+\centering
+\small
+\setlength{\tabcolsep}{8pt}
+\caption{Comparison with conventional baselines and TimeCMA-family models on HS300 rolling-window prediction. Best results are shown in bold. Lower is better for MSE and MAE; higher is better for IC, RankIC, ICIR, and RankICIR.}
+\label{tab:main_results}
+\begin{tabular}{lcccccc}
+\toprule
+Method & MSE$\downarrow$ & MAE$\downarrow$ & IC$\uparrow$ & RankIC$\uparrow$ & ICIR$\uparrow$ & RankICIR$\uparrow$ \\
+\midrule
+MLP & 0.002514 & 0.033878 & -0.0410 & -0.0410 & -0.4259 & -0.4138 \\
+LSTM & 0.002270 & 0.031271 & 0.0282 & 0.0191 & 0.0612 & 0.0743 \\
+ALSTM & 0.002259 & 0.030624 & -0.0699 & -0.0330 & -0.6437 & -0.2227 \\
+Transformer & 0.002517 & 0.033423 & -0.0383 & -0.0248 & -0.4964 & -0.2021 \\
+XGBoost & 0.002305 & 0.031593 & -0.0336 & -0.0238 & -0.5025 & -0.3226 \\
+\midrule
+TimeCMA w/o Graph & 0.002888 & 0.037947 & 0.0337 & 0.0294 & 0.3521 & 0.3179 \\
+Graph-TimeCMA (Static) & \textbf{0.002835} & \textbf{0.037659} & 0.0355 & 0.0332 & 0.4206 & 0.3916 \\
+Graph-TimeCMA (Dynamic6m) & 0.002845 & 0.038213 & \textbf{0.0497} & \textbf{0.0506} & \textbf{0.5072} & \textbf{0.4771} \\
+\bottomrule
+\end{tabular}
+\end{table*}
+
+% Ablation table
+\begin{table*}[t]
+\centering
+\small
+\setlength{\tabcolsep}{8pt}
+\caption{Ablation study on the effects of graph usage, temporal decay, graph preprocessing, and winsorization. Best results are shown in bold.}
+\label{tab:ablation_results}
+\begin{tabular}{lcccccc}
+\toprule
+Method & MSE$\downarrow$ & MAE$\downarrow$ & IC$\uparrow$ & RankIC$\uparrow$ & ICIR$\uparrow$ & RankICIR$\uparrow$ \\
+\midrule
+no\_graph & 0.002888 & 0.037947 & 0.0337 & 0.0294 & 0.3521 & 0.3179 \\
+static & 0.002835 & 0.037659 & 0.0355 & 0.0332 & 0.4206 & \textbf{0.3916} \\
+dynamic6m & 0.002845 & 0.038213 & \textbf{0.0497} & \textbf{0.0506} & \textbf{0.5072} & \textbf{0.4771} \\
+dynamic6m\_no\_decay & 0.002839 & 0.038069 & 0.0481 & 0.0469 & 0.4902 & 0.4536 \\
+static\_no\_graph\_preproc & \textbf{0.002770} & \textbf{0.037281} & 0.0405 & 0.0351 & 0.4524 & 0.3853 \\
+static\_no\_winsorize & 0.002865 & 0.037845 & 0.0315 & 0.0290 & 0.3819 & 0.3403 \\
+\bottomrule
+\end{tabular}
+\end{table*}
+
+% Optional per-window table
+\begin{table*}[t]
+\centering
+\small
+\setlength{\tabcolsep}{6pt}
+\caption{Per-window results of the three TimeCMA-family variants.}
+\label{tab:per_window_timecma}
+\begin{tabular}{lcccccc}
+\toprule
+Window & Method & MSE$\downarrow$ & MAE$\downarrow$ & IC$\uparrow$ & RankIC$\uparrow$ & RankICIR$\uparrow$ \\
+\midrule
+\multirow{3}{*}{2025-04}
+& no\_graph & 0.002967 & 0.040098 & 0.0380 & 0.0333 & 0.4269 \\
+& static & 0.002902 & 0.039524 & 0.0429 & 0.0389 & 0.5152 \\
+& dynamic6m & 0.002960 & 0.040107 & 0.0434 & 0.0388 & 0.5044 \\
+\midrule
+\multirow{3}{*}{2025-05}
+& no\_graph & 0.001638 & 0.031150 & 0.0724 & 0.0680 & 0.6587 \\
+& static & 0.001605 & 0.030820 & 0.0728 & 0.0724 & 0.7344 \\
+& dynamic6m & 0.001570 & 0.030590 & 0.0859 & 0.0772 & 0.6559 \\
+\midrule
+\multirow{3}{*}{2025-06}
+& no\_graph & 0.002481 & 0.037875 & 0.0432 & 0.0236 & 0.2467 \\
+& static & 0.002464 & 0.037577 & 0.0517 & 0.0394 & 0.3313 \\
+& dynamic6m & 0.002619 & 0.038741 & 0.0326 & 0.0284 & 0.2541 \\
+\midrule
+\multirow{3}{*}{2025-07}
+& no\_graph & 0.003106 & 0.038122 & 0.0112 & 0.0158 & 0.1532 \\
+& static & 0.003058 & 0.037930 & 0.0022 & 0.0148 & 0.1102 \\
+& dynamic6m & 0.003118 & 0.038469 & 0.0262 & 0.0399 & 0.3913 \\
+\midrule
+\multirow{3}{*}{2025-08}
+& no\_graph & 0.003445 & 0.041614 & -0.0234 & -0.0123 & -0.1200 \\
+& static & 0.003395 & 0.041489 & -0.0265 & -0.0199 & -0.1791 \\
+& dynamic6m & 0.003180 & 0.039634 & 0.0776 & 0.0749 & 0.6552 \\
+\midrule
+\multirow{3}{*}{2025-09}
+& no\_graph & 0.003693 & 0.038824 & 0.0610 & 0.0483 & 0.5427 \\
+& static & 0.003586 & 0.038611 & 0.0701 & 0.0539 & 0.8122 \\
+& dynamic6m & 0.003623 & 0.041740 & 0.0325 & 0.0447 & 0.4015 \\
+\bottomrule
+\end{tabular}
+\end{table*}

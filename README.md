@@ -153,3 +153,52 @@ Outputs are written to:
 
 * `results/all_stocks_complete_data/rolling_experiments/window_metrics.csv`
 * `results/all_stocks_complete_data/rolling_experiments/method_summary.csv`
+
+### HS300 first-round ablation experiments
+
+The repo also includes a dedicated entry point for the first batch of ablations:
+
+* `no_graph`: remove the co-occurrence graph
+* `static`: static Snowball co-occurrence graph
+* `dynamic6m`: 6-month rolling graph with exponential time decay
+* `dynamic6m_no_decay`: 6-month rolling graph without time decay
+* `static_no_graph_preproc`: disable `log1p` and `top-k` graph preprocessing
+* `static_no_winsorize`: disable training-target winsorization
+
+Run:
+
+```bash
+bash scripts/Rolling_HS300_Ablations.sh
+```
+
+This uses the same default rolling windows (`2025-04` through `2025-09`) and writes the same summary files under:
+
+* `results/all_stocks_complete_data/rolling_experiments/window_metrics.csv`
+* `results/all_stocks_complete_data/rolling_experiments/method_summary.csv`
+
+### HS300 conventional baseline comparisons
+
+The repo also supports rolling-window comparisons against common sequence baselines under the same splits and metrics:
+
+* `mlp`
+* `lstm`
+* `alstm`
+* `transformer`
+* `xgboost`
+* `no_graph`
+* `static`
+* `dynamic6m`
+
+Run:
+
+```bash
+bash scripts/Rolling_HS300_Baselines.sh
+```
+
+Notes:
+
+* The conventional baselines do not use prompt embeddings.
+* `xgboost` requires the `xgboost` Python package on the remote environment.
+* Results are written to the same rolling summary files:
+  * `results/all_stocks_complete_data/rolling_experiments/window_metrics.csv`
+  * `results/all_stocks_complete_data/rolling_experiments/method_summary.csv`

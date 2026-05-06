@@ -1,0 +1,301 @@
+\documentclass[runningheads]{llncs}
+
+\usepackage[T1]{fontenc}
+\usepackage[utf8]{inputenc}
+\usepackage{graphicx}
+\usepackage{amsmath}
+\usepackage{amssymb}
+\usepackage{booktabs}
+\usepackage{multirow}
+
+\title{Graph-TimeCMA: Text-Induced Graph Enhanced Cross-Modal Learning for Multi-Stock Return Prediction}
+\titlerunning{Graph-TimeCMA for Multi-Stock Return Prediction}
+
+\author{Anonymous Author(s)}
+\authorrunning{Anonymous Author(s)}
+\institute{Anonymous Institution\\
+\email{anonymous@example.com}}
+
+\begin{document}
+\maketitle
+
+\begin{abstract}
+Stock return prediction is inherently a multimodal learning problem, since investment decisions are jointly influenced by historical market behavior, textual market narratives, and cross-stock relations. Existing forecasting models mainly focus on numerical temporal patterns, while text-based financial models usually treat textual signals as stock-level evidence and graph-based stock predictors often rely on predefined or price-derived relations. In this paper, we propose \textbf{Graph-TimeCMA}, a text-induced graph-enhanced cross-modal framework for multi-stock return prediction. Our method extends TimeCMA by introducing financial text in two complementary roles. First, a frozen large language model encodes stock-level prompt embeddings from historical market sequences, providing semantic representations. Second, financial social media is used to construct stock co-occurrence graphs, providing structural relations among stocks. The resulting graph is injected into the time-series branch, the prompt branch, and the cross-modal aligned representation through lightweight multi-stage graph propagation. We evaluate the proposed method on HS300 multi-stock prediction under a rolling-window setting and report both regression metrics and finance-oriented cross-sectional metrics, including MSE, MAE, IC, RankIC, ICIR, and RankICIR. Experimental results show that the dynamic graph variant achieves the best average IC, RankIC, ICIR, and RankICIR, demonstrating that text-induced stock relations can effectively enhance cross-modal stock prediction.
+
+\keywords{Stock return prediction \and multimodal forecasting \and financial text \and co-occurrence graph \and time series}
+\end{abstract}
+
+\section{Introduction}
+
+Stock return prediction remains a central challenge in financial artificial intelligence. Classical market efficiency theory suggests that asset prices incorporate available information rapidly, making persistent prediction difficult~\cite{fama1970efficient}. At the same time, behavioral finance and market microstructure research show that prices are also shaped by investor sentiment, media attention, topic diffusion, and belief propagation~\cite{baker2006investor,barber2008all,tetlock2007giving,da2011attention}. In practice, experienced financial analysts rarely rely on a single signal. They jointly inspect price trends, trading volume, sector rotation, investor attention, company-specific narratives, and related stocks. Stock prediction is therefore not merely a numerical forecasting task, but a multimodal reasoning problem involving temporal signals, textual evidence, and cross-stock relations.
+
+Prior studies have explored these components separately. Numerical forecasting models learn temporal dependencies from historical prices and indicators, but often neglect market narratives and external relation evidence~\cite{zhou2021informer,wu2021autoformer,nie2022patchtst,liu2023itransformer,wang2024timemixer}. Financial NLP methods encode news, reports, or social media discussions, yet they typically use text only as stock-level evidence~\cite{xu2018stocknet,sawhney2020deep,araci2019finbert,wu2023bloomberggpt,wang2024llmfactor}. Graph-based stock prediction methods explicitly model inter-stock dependencies, but their graphs are often predefined, price-derived, or slowly updated~\cite{xu2021hist,qian2024mdgnn,xia2024cisthpan}. As a result, existing approaches rarely integrate numerical signals, language representations, and text-induced stock relations in a unified framework.
+
+Two recent studies are especially relevant to this work. TimeCMA~\cite{liu2025timecma} aligns numerical time-series representations with LLM-derived prompt embeddings through cross-modality alignment, showing that language representations can enhance multivariate forecasting. However, it does not explicitly model stock-level relations induced from financial text. In contrast, COGRASP~\cite{li2025cograsp} constructs stock co-occurrence graphs from reports, newspapers, and social media by linking stocks co-mentioned in the same content. Such graphs provide interpretable and dynamically updated stock relations, but they are not integrated into an LLM-enhanced cross-modal forecasting framework.
+
+To bridge this gap, we propose \textbf{Graph-TimeCMA}, a text-induced graph-enhanced cross-modal framework for multi-stock return prediction. The key idea is to treat financial text as both a semantic resource and a structural resource. On the semantic side, a frozen LLM produces stock-level prompt embeddings from historical time-series prompts. On the structural side, financial social media is used to construct stock co-occurrence graphs. These text-induced relations are then injected into the time-series branch, the prompt branch, and the aligned representation through lightweight graph propagation. In this way, Graph-TimeCMA unifies temporal information, language representations, and cross-stock relation priors within a single multimodal prediction framework.
+
+We evaluate the proposed framework on HS300 multi-stock prediction, where the task is to predict future 5-day cumulative returns under rolling-window evaluation. Besides MSE and MAE, we report finance-oriented cross-sectional metrics, including IC, RankIC, ICIR, and RankICIR, which are widely used to assess predictive correlation, ranking quality, and stability in quantitative equity research~\cite{grinold2000active}. The results show that the dynamic graph variant delivers the best average cross-sectional performance, while ablation studies confirm the contributions of text-induced graphs, temporal decay, and label winsorization.
+
+The main contributions of this work are as follows:
+\begin{itemize}
+    \item We formulate multi-stock return prediction as a multimodal learning problem that jointly leverages numerical market signals, language representations, and text-induced stock relations.
+    \item We propose Graph-TimeCMA, which extends cross-modal alignment by injecting financial-social-media-induced stock co-occurrence graphs into the time-series branch, the prompt branch, and the aligned representation.
+    \item We construct both static and dynamic stock co-occurrence graphs from financial text and investigate the effect of temporal decay in modeling time-varying stock relations.
+    \item We conduct rolling-window experiments and ablation studies on HS300 multi-stock prediction, showing that text-induced graphs improve cross-sectional correlation and prediction stability.
+\end{itemize}
+
+\section{Related Work}
+
+\subsection{Financial Text for Stock Prediction}
+
+Financial text has long been used to study market behavior and stock movements. Prior finance research shows that media tone, investor sentiment, and attention contain information related to returns and trading activity~\cite{tetlock2007giving,loughran2011liability,loughran2016survey}. Online investor discussions and social media further reveal market beliefs and attention patterns, although they also contain substantial noise~\cite{antweiler2004noise,chen2014wisdom}. Textual analysis in finance requires domain-specific treatment because financial language differs substantially from general-domain language~\cite{loughran2016survey}.
+
+NLP-based stock prediction directly models textual evidence. StockNet jointly models tweets and historical prices for stock movement prediction~\cite{xu2018stocknet}. Subsequent work combines social media text, financial time series, and company correlations, showing that textual signals and inter-company dependencies can be complementary~\cite{sawhney2020deep}. Domain-adapted language models such as FinBERT~\cite{araci2019finbert} and BloombergGPT~\cite{wu2023bloomberggpt} further demonstrate the value of financial-domain pretraining. Recent LLM-based financial prediction methods use financial news to obtain return-predictive representations or explainable factors~\cite{guo2024finetuning,wang2024llmfactor}. However, most prior work uses text as stock-level sentiment, event, or factor evidence. Our work instead uses text in two roles: as semantic input for LLM-prompt representations and as structural evidence for constructing stock relations.
+
+\subsection{Multivariate and LLM-based Time-Series Forecasting}
+
+Multi-stock prediction can be formulated as multivariate time-series forecasting, where each stock is a variable or node and the target is its future return. Recent forecasting models improve numerical temporal modeling through efficient attention, decomposition, patching, variate-token attention, and multiscale mixing~\cite{zhou2021informer,wu2021autoformer,nie2022patchtst,liu2023itransformer,wang2024timemixer}. These models provide strong numerical backbones, but they mainly infer dependencies from historical co-movement and do not explicitly use financial text as relation evidence.
+
+LLM-based forecasting introduces language representations into time-series modeling. Time-LLM reprograms time-series inputs for frozen LLMs~\cite{jin2023timellm}, while semantic alignment approaches map time-series embeddings into language-model-informed representation spaces~\cite{pan2024sip}. TimeCMA~\cite{liu2025timecma} is the closest framework to ours: it aligns a time-series branch with an LLM-prompt branch to retrieve useful temporal components from prompt embeddings. However, TimeCMA focuses on temporal-prompt alignment and does not incorporate stock relation priors induced from financial text.
+
+\subsection{Graph-based Stock Prediction and Text-Induced Relations}
+
+Graph-based stock prediction models explicitly represent cross-stock dependencies. In stock prediction, graph neural networks have been used to encode company relations, concept-oriented shared information, and dynamic multi-relational dependencies~\cite{xu2021hist,qian2024mdgnn,xia2024cisthpan}. These studies show that cross-stock structure matters, but many relation graphs are predefined, price-derived, or slow to update.
+
+COGRASP~\cite{li2025cograsp} addresses graph construction from a text perspective. It builds stock co-occurrence graphs from reports, newspapers, and social media by linking stocks co-mentioned in the same content and weighting edges by co-mention frequency. Such text-induced graphs are interpretable because each relation can be traced back to textual co-mentions. However, COGRASP uses co-occurrence graphs mainly as relation mining signals and does not integrate them into an LLM-based cross-modal alignment framework.
+
+\section{Method}
+
+\subsection{Problem Definition}
+
+Let $S = \{s_1, \dots, s_N\}$ denote the stock universe. At prediction day $t$, each stock is associated with $F$-dimensional market features over a look-back window of length $L$. The multi-stock input tensor is:
+\begin{equation}
+X_{t-L+1:t} \in \mathbb{R}^{L \times N \times F}.
+\end{equation}
+The prediction target is the future $H$-day cumulative return:
+\begin{equation}
+y^{(H)}_{i,t} = \frac{\text{close}_{i,t+H}}{\text{close}_{i,t}} - 1.
+\end{equation}
+The model outputs stock-level return predictions:
+\begin{equation}
+\hat{y}^{(H)}_t \in \mathbb{R}^{N}.
+\end{equation}
+We use $H = 5$ and formulate the task as regression, while evaluation emphasizes cross-sectional metrics such as IC and RankIC.
+
+\subsection{Framework Overview}
+
+Graph-TimeCMA extends TimeCMA~\cite{liu2025timecma} by injecting a text-induced stock co-occurrence graph into the cross-modal forecasting framework. The overall mapping is:
+\begin{equation}
+\hat{y}^{(H)}_t = f_\theta(X_{t-L+1:t}, E_t, A_t),
+\end{equation}
+where $E_t$ denotes cached LLM prompt embeddings and $A_t$ denotes the normalized stock co-occurrence graph.
+
+The framework contains four components: a time-series encoder for numerical market features, an LLM-prompt encoder for cached GPT-2 last-token embeddings~\cite{radford2019language}, a text-induced stock co-occurrence graph constructed from financial social media, and a multi-stage graph propagation module applied to the time-series representation, prompt representation, and cross-modal aligned representation.
+
+\subsection{Market Features and Return Labels}
+
+For each stock, we construct nine market features: open, high, low, close, volume, amount, daily return, log return, and amplitude. Features are standardized using statistics fitted only on the training split to avoid leakage.
+
+To reduce the impact of extreme returns, we apply label winsorization based on training-set quantiles:
+\begin{equation}
+q_i^{\text{low}} = \text{Quantile}(y^{(H)}_{i,t}, \alpha), \quad
+q_i^{\text{high}} = \text{Quantile}(y^{(H)}_{i,t}, 1-\alpha),
+\end{equation}
+\begin{equation}
+\tilde{y}^{(H)}_{i,t} = \min \left( \max \left(y^{(H)}_{i,t}, q_i^{\text{low}}\right), q_i^{\text{high}} \right).
+\end{equation}
+We use $\alpha = 0.01$ by default.
+
+\subsection{LLM Prompt Encoding}
+
+Following prompt-based LLM time-series modeling~\cite{jin2023timellm,liu2025timecma}, we construct a textual prompt from each stock's historical time-series window and feed it into a frozen GPT-2 model~\cite{radford2019language}. We take the last-token hidden state as the stock-level prompt embedding:
+\begin{equation}
+e_{i,t} = g_\phi(p_{i,t})_{\text{last}} \in \mathbb{R}^{768}.
+\end{equation}
+All stock-level embeddings form:
+\begin{equation}
+E_t \in \mathbb{R}^{N \times 768}.
+\end{equation}
+These embeddings are precomputed and cached offline. The prompt encoder maps them into the model hidden space:
+\begin{equation}
+H_t^{p} = f_p(E_t) \in \mathbb{R}^{N \times d}.
+\end{equation}
+
+\subsection{Time-Series Encoding}
+
+The numerical branch maps historical market features into stock-level temporal embeddings:
+\begin{equation}
+H_t^{ts} = f_{ts}(X_{t-L+1:t}) \in \mathbb{R}^{N \times d}.
+\end{equation}
+Each stock is treated as a variable or node, consistent with the co-occurrence graph semantics~\cite{liu2023itransformer,liu2025timecma}.
+
+\subsection{Text-Induced Stock Co-Occurrence Graph}
+
+Following COGRASP~\cite{li2025cograsp}, let $D = \{d_1, \dots, d_M\}$ be the document set, and let $S_m \subseteq S$ be the set of stocks mentioned in document $d_m$. The static co-occurrence count between stocks $s_i$ and $s_j$ is:
+\begin{equation}
+C_{ij} = \sum_{m=1}^{M} \mathbb{I}(s_i \in S_m)\mathbb{I}(s_j \in S_m).
+\end{equation}
+
+For the dynamic graph, only documents in the six-month window before the test month are used. Each document is assigned an exponential decay weight:
+\begin{equation}
+w_m(t) = 0.5^{\Delta_m(t)/T_{\text{half}}},
+\end{equation}
+where $\Delta_m(t)$ is the number of days from the document timestamp to the end of the graph window and $T_{\text{half}} = 60$ days by default. The dynamic co-occurrence matrix is:
+\begin{equation}
+C^{(t)}_{ij} = \sum_{m : d_m \in W(t)} w_m(t)\mathbb{I}(s_i \in S_m)\mathbb{I}(s_j \in S_m).
+\end{equation}
+
+The graph is further processed by log compression, top-$k$ sparsification, self-loop addition, and symmetric normalization:
+\begin{equation}
+\tilde{C}_{ij} = \log(1 + C_{ij}),
+\end{equation}
+\begin{equation}
+\hat{C} = \text{TopK}(\tilde{C}),
+\end{equation}
+\begin{equation}
+A = D^{-1/2}(\hat{C}+I)D^{-1/2}.
+\end{equation}
+
+\subsection{Multi-Stage Graph Propagation and Alignment}
+
+For any stock-level representation $H \in \mathbb{R}^{N \times d}$, graph propagation is defined as:
+\begin{equation}
+H^{(0)} = H, \quad H^{(k+1)} = A H^{(k)}.
+\end{equation}
+After $K$ propagation steps:
+\begin{equation}
+H_{\text{prop}} = H^{(K)}.
+\end{equation}
+A learnable graph gate combines the original and propagated representations:
+\begin{equation}
+g = \sigma(\gamma),
+\end{equation}
+\begin{equation}
+\text{GProp}(H) = (1-g)H + gH_{\text{prop}}.
+\end{equation}
+This lightweight propagation design avoids introducing a full graph neural network and isolates the effect of text-induced relation priors~\cite{kipf2017semi,velivckovic2018graph}.
+
+We first graph-enhance the time-series representation:
+\begin{equation}
+\bar{H}^{ts}_t = \text{GProp}(H^{ts}_t),
+\end{equation}
+and the prompt representation:
+\begin{equation}
+\bar{H}^{p}_t = \text{GProp}(H^{p}_t).
+\end{equation}
+Cross-modal alignment then follows scaled dot-product attention~\cite{vaswani2017attention}:
+\begin{equation}
+Q = \bar{H}^{ts}_t W_Q, \quad
+K = \bar{H}^{p}_t W_K, \quad
+V = \bar{H}^{p}_t W_V,
+\end{equation}
+\begin{equation}
+Z_t = \text{softmax}\left(\frac{QK^\top}{\sqrt{d}}\right)V.
+\end{equation}
+Finally, the aligned representation is graph-enhanced again:
+\begin{equation}
+\bar{Z}_t = \text{GProp}(Z_t).
+\end{equation}
+
+\subsection{Prediction Objective and Evaluation Metrics}
+
+The final prediction is obtained by a decoder:
+\begin{equation}
+\hat{y}^{(H)}_t = f_{\text{dec}}(\bar{Z}_t).
+\end{equation}
+The model is optimized using Smooth L1 loss:
+\begin{equation}
+\mathcal{L}_{\text{reg}} = \frac{1}{BN} \sum_{b=1}^{B} \sum_{i=1}^{N} \text{SmoothL1}(\hat{y}_{b,i}, \tilde{y}_{b,i}).
+\end{equation}
+We report MSE, MAE, IC, RankIC, ICIR, and RankICIR~\cite{grinold2000active}.
+
+\section{Experiments}
+
+\subsection{Dataset and Rolling Setting}
+
+We evaluate Graph-TimeCMA on HS300 multi-stock prediction. Market data are daily-frequency A-share quotes covering January 2024 to September 2025. We use a long-form panel with stock-level daily observations and derive nine features for each stock: open, high, low, close, volume, amount, daily return, log return, and amplitude.
+
+Financial text is collected from Snowball social media. After cleaning, time normalization, stock-code extraction, and duplicate removal, we use the resulting posts to construct stock co-occurrence graphs. The stock universe is defined by the intersection of the HS300 stock pool, the available market data, and the graph node set.
+
+We adopt a rolling-window setting with 12 months for training, 3 months for validation, and 1 month for testing, using a step size of 1 month. The test months are April 2025 through September 2025, resulting in six rolling windows. For the static graph, we construct the co-occurrence graph from the training period of each window. For the dynamic graph, we use the six months immediately preceding the test month and apply exponential time decay with half-life 60 days.
+
+\subsection{Baselines and Implementation}
+
+We compare Graph-TimeCMA against conventional baselines, including MLP, LSTM~\cite{hochreiter1997long}, ALSTM, Transformer~\cite{vaswani2017attention}, and XGBoost~\cite{chen2016xgboost}, as well as TimeCMA-family baselines: \texttt{no\_graph}, \texttt{static}, and \texttt{dynamic6m}.
+
+We use a look-back window $L = 60$ and target horizon $H = 5$. Prompt embeddings are generated with a frozen GPT-2 model and cached offline. The hidden dimension is set to 128, the batch size is 16, the learning rate is $10^{-4}$, and the optimizer is AdamW. The graph propagation depth is 1. For graph preprocessing, the default static and dynamic graph settings apply \texttt{log1p} compression and keep top-10 neighbors per node. We use 1\%--99\% training-label winsorization unless otherwise specified in ablations.
+
+\begin{table}[t]
+\centering
+\small
+\caption{Comparison with conventional baselines and TimeCMA-family models on HS300 rolling-window prediction. Best results are shown in bold. Lower is better for MSE and MAE; higher is better for IC, RankIC, ICIR, and RankICIR.}
+\label{tab:main_results}
+\resizebox{\textwidth}{!}{
+\begin{tabular}{lcccccc}
+\toprule
+Method & MSE$\downarrow$ & MAE$\downarrow$ & IC$\uparrow$ & RankIC$\uparrow$ & ICIR$\uparrow$ & RankICIR$\uparrow$ \\
+\midrule
+MLP & 0.002514 & 0.033878 & -0.0410 & -0.0410 & -0.4259 & -0.4138 \\
+LSTM & 0.002270 & 0.031271 & 0.0282 & 0.0191 & 0.0612 & 0.0743 \\
+ALSTM & 0.002259 & 0.030624 & -0.0699 & -0.0330 & -0.6437 & -0.2227 \\
+Transformer & 0.002517 & 0.033423 & -0.0383 & -0.0248 & -0.4964 & -0.2021 \\
+XGBoost & 0.002305 & 0.031593 & -0.0336 & -0.0238 & -0.5025 & -0.3226 \\
+\midrule
+TimeCMA w/o Graph & 0.002888 & 0.037947 & 0.0337 & 0.0294 & 0.3521 & 0.3179 \\
+Graph-TimeCMA (Static) & \textbf{0.002835} & \textbf{0.037659} & 0.0355 & 0.0332 & 0.4206 & 0.3916 \\
+Graph-TimeCMA (Dynamic6m) & 0.002845 & 0.038213 & \textbf{0.0497} & \textbf{0.0506} & \textbf{0.5072} & \textbf{0.4771} \\
+\bottomrule
+\end{tabular}}
+\end{table}
+
+\section{Results}
+
+Table~\ref{tab:main_results} reports the average results over six rolling windows. Conventional baselines often achieve lower MSE and MAE than the TimeCMA family, indicating that they can serve as strong point-wise regressors. However, the ranking-oriented metrics tell a different story. The proposed Graph-TimeCMA variants substantially outperform conventional baselines in IC, RankIC, ICIR, and RankICIR. The dynamic graph variant achieves the best average IC (0.0497), RankIC (0.0506), ICIR (0.5072), and RankICIR (0.4771). Even the graph-free TimeCMA baseline outperforms most conventional baselines in these cross-sectional metrics.
+
+This discrepancy suggests that lower regression error does not necessarily imply better cross-sectional prediction quality. Several conventional models appear to produce conservative predictions with smaller numerical deviations, but they fail to preserve the relative ordering of stocks within a day. In contrast, Graph-TimeCMA better captures the relative return structure across stocks, which is more relevant for cross-sectional stock prediction.
+
+Comparing the three TimeCMA-family models further clarifies the benefit of text-induced graphs. Relative to \texttt{no\_graph}, the static graph improves IC from 0.0337 to 0.0355, RankIC from 0.0294 to 0.0332, ICIR from 0.3521 to 0.4206, and RankICIR from 0.3179 to 0.3916. The dynamic graph improves these metrics further to 0.0497, 0.0506, 0.5072, and 0.4771, respectively.
+
+\begin{table}[t]
+\centering
+\small
+\caption{Ablation study on the effects of graph usage, temporal decay, graph preprocessing, and winsorization. Best results are shown in bold.}
+\label{tab:ablation_results}
+\resizebox{\textwidth}{!}{
+\begin{tabular}{lcccccc}
+\toprule
+Method & MSE$\downarrow$ & MAE$\downarrow$ & IC$\uparrow$ & RankIC$\uparrow$ & ICIR$\uparrow$ & RankICIR$\uparrow$ \\
+\midrule
+no\_graph & 0.002888 & 0.037947 & 0.0337 & 0.0294 & 0.3521 & 0.3179 \\
+static & 0.002835 & 0.037659 & 0.0355 & 0.0332 & 0.4206 & \textbf{0.3916} \\
+dynamic6m & 0.002845 & 0.038213 & \textbf{0.0497} & \textbf{0.0506} & \textbf{0.5072} & \textbf{0.4771} \\
+dynamic6m\_no\_decay & 0.002839 & 0.038069 & 0.0481 & 0.0469 & 0.4902 & 0.4536 \\
+static\_no\_graph\_preproc & \textbf{0.002770} & \textbf{0.037281} & 0.0405 & 0.0351 & 0.4524 & 0.3853 \\
+static\_no\_winsorize & 0.002865 & 0.037845 & 0.0315 & 0.0290 & 0.3819 & 0.3403 \\
+\bottomrule
+\end{tabular}}
+\end{table}
+
+\section{Ablation Study}
+
+We conduct ablation experiments to analyze the role of text-induced graphs, temporal decay, graph preprocessing, and winsorization. Table~\ref{tab:ablation_results} summarizes the results.
+
+Comparing \texttt{static} with \texttt{no\_graph} confirms that introducing a text-induced stock graph improves all correlation and stability metrics. This validates the central hypothesis that stock relations mined from financial text provide useful structural priors beyond pure temporal forecasting.
+
+Comparing \texttt{dynamic6m} with \texttt{dynamic6m\_no\_decay} shows that temporal decay is beneficial. The dynamic graph with decay achieves higher IC, RankIC, ICIR, and RankICIR than the version without decay. This suggests that recent co-mentions are more informative than older ones, and that time-sensitive relation weighting is useful in dynamic market environments.
+
+Comparing \texttt{static} with \texttt{static\_no\_winsorize} shows that winsorization improves overall robustness. Without winsorization, both correlation metrics and stability metrics drop. This indicates that moderate clipping of extreme training returns helps the model avoid overreacting to heavy-tailed labels.
+
+An interesting finding is that \texttt{static\_no\_graph\_preproc} achieves the best MSE and MAE, and even slightly improves IC and RankIC relative to \texttt{static}. This suggests that, under the current sparse Snowball co-occurrence graph, aggressive \texttt{log1p + top-$k$} processing may remove some useful weak edges. Graph preprocessing is therefore not universally beneficial; its effectiveness depends on the sparsity and edge-weight distribution of the graph.
+
+\section{Discussion and Conclusion}
+
+The key advantage of Graph-TimeCMA is not simply stronger point-wise regression. Instead, it improves the quality of relative return modeling across stocks. The prompt branch provides stock-level semantic cues derived from historical trajectories, while the graph branch injects text-induced relation priors reflecting co-mentioned themes, events, or investor attention. This combination is particularly useful for predicting which stocks are relatively stronger or weaker on a given day.
+
+This paper presented Graph-TimeCMA, a text-induced graph-enhanced cross-modal framework for multi-stock return prediction. By extending TimeCMA with stock co-occurrence graphs mined from financial social media, the proposed method uses financial text as both semantic evidence and structural relation evidence. Experiments on HS300 rolling-window prediction show that the dynamic graph variant achieves the best average IC, RankIC, ICIR, and RankICIR among all compared methods. Ablation results further confirm the benefits of graph priors, temporal decay, and label winsorization. Overall, the results suggest that cross-modal alignment and text-induced relation modeling are a promising direction for multimodal stock prediction.
+
+\bibliographystyle{splncs04}
+\bibliography{custom}
+
+\end{document}

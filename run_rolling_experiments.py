@@ -10,6 +10,16 @@ import sys
 from datetime import date
 
 
+TIMECMA_METHODS = (
+    "no_graph",
+    "static",
+    "dynamic6m",
+    "dynamic6m_no_decay",
+    "static_no_graph_preproc",
+    "static_no_winsorize",
+)
+BASELINE_METHODS = ("mlp", "lstm", "alstm", "transformer", "xgboost")
+ALL_METHODS = TIMECMA_METHODS + BASELINE_METHODS
 DEFAULT_METHODS = ("no_graph", "static", "dynamic6m")
 
 
@@ -20,7 +30,7 @@ def parse_args():
     parser.add_argument("--stock_pool_file", default="dataset/HS300/stock_pool.csv")
     parser.add_argument("--runtime_root", default="dataset/HS300/rolling/runtime")
     parser.add_argument("--graph_root", default="dataset/HS300/rolling/graphs")
-    parser.add_argument("--methods", nargs="+", default=list(DEFAULT_METHODS), choices=list(DEFAULT_METHODS))
+    parser.add_argument("--methods", nargs="+", default=list(DEFAULT_METHODS), choices=list(ALL_METHODS))
     parser.add_argument("--test_month_start", default="2025-04")
     parser.add_argument("--test_month_end", default="2025-09")
     parser.add_argument("--train_months", type=int, default=12)
@@ -103,15 +113,57 @@ def build_window(test_month, train_months, val_months):
     }
 
 
-def graph_dates_for_method(window, method, dynamic_graph_months):
-    if method == "static":
+def resolve_method_config(args, method):
+    config = {
+        "method": method,
+        "family": "timecma",
+        "requires_embeddings": True,
+        "use_graph": method != "no_graph",
+        "graph_kind": "none",
+        "graph_weight_transform": args.graph_weight_transform,
+        "graph_top_k": args.graph_top_k,
+        "graph_time_decay": "none",
+        "graph_decay_half_life_days": 0.0,
+        "target_winsorize_lower": args.target_winsorize_lower,
+        "target_winsorize_upper": args.target_winsorize_upper,
+    }
+
+    if method in BASELINE_METHODS:
+        config["family"] = "baseline"
+        config["requires_embeddings"] = False
+        config["use_graph"] = False
+        config["graph_kind"] = "none"
+    elif method == "static":
+        config["graph_kind"] = "static"
+    elif method == "dynamic6m":
+        config["graph_kind"] = "dynamic6m"
+        config["graph_time_decay"] = args.dynamic_time_decay
+        config["graph_decay_half_life_days"] = float(args.dynamic_decay_half_life_days)
+    elif method == "dynamic6m_no_decay":
+        config["graph_kind"] = "dynamic6m"
+        config["graph_time_decay"] = "none"
+        config["graph_decay_half_life_days"] = 0.0
+    elif method == "static_no_graph_preproc":
+        config["graph_kind"] = "static"
+        config["graph_weight_transform"] = "none"
+        config["graph_top_k"] = 0
+    elif method == "static_no_winsorize":
+        config["graph_kind"] = "static"
+        config["target_winsorize_lower"] = 0.0
+        config["target_winsorize_upper"] = 1.0
+
+    return config
+
+
+def graph_dates_for_method(window, method_config, dynamic_graph_months):
+    if method_config["graph_kind"] == "static":
         return window["train_start_date"], window["train_end_date"]
-    if method == "dynamic6m":
+    if method_config["graph_kind"] == "dynamic6m":
         test_month = parse_month(window["test_month"])
         graph_start = add_months(test_month, -dynamic_graph_months)
         graph_end = month_end(add_months(test_month, -1))
         return to_text(graph_start), to_text(graph_end)
-    raise ValueError(f"Method {method} does not use a graph window.")
+    raise ValueError(f"Method {method_config['method']} does not use a graph window.")
 
 
 def normalize_number_token(value):
@@ -120,33 +172,39 @@ def normalize_number_token(value):
     return str(value).replace(".", "p")
 
 
-def graph_build_signature(args, method):
-    if method == "static":
+def graph_build_signature(method_config):
+    if method_config["graph_kind"] == "static":
         return "decay-none"
-    if method == "dynamic6m":
-        if args.dynamic_time_decay == "none":
+    if method_config["graph_kind"] == "dynamic6m":
+        if method_config["graph_time_decay"] == "none":
             return "decay-none"
-        return f"decay-{args.dynamic_time_decay}-hl{normalize_number_token(args.dynamic_decay_half_life_days)}"
+        return (
+            f"decay-{method_config['graph_time_decay']}-"
+            f"hl{normalize_number_token(method_config['graph_decay_half_life_days'])}"
+        )
     return "no-graph"
 
 
-def result_signature(args, method):
+def result_signature(method_config):
     winsorize_signature = (
         "tw-none"
-        if args.target_winsorize_lower <= 0.0 and args.target_winsorize_upper >= 1.0
-        else f"tw-{normalize_number_token(args.target_winsorize_lower)}-{normalize_number_token(args.target_winsorize_upper)}"
+        if method_config["target_winsorize_lower"] <= 0.0 and method_config["target_winsorize_upper"] >= 1.0
+        else (
+            f"tw-{normalize_number_token(method_config['target_winsorize_lower'])}-"
+            f"{normalize_number_token(method_config['target_winsorize_upper'])}"
+        )
     )
 
-    if method == "no_graph":
+    if not method_config["use_graph"]:
         return winsorize_signature
 
     parts = [
         winsorize_signature,
-        f"gw-{args.graph_weight_transform}",
-        f"topk-{args.graph_top_k}",
+        f"gw-{method_config['graph_weight_transform']}",
+        f"topk-{method_config['graph_top_k']}",
     ]
-    if method == "dynamic6m":
-        parts.append(graph_build_signature(args, method))
+    if method_config["graph_kind"] == "dynamic6m":
+        parts.append(graph_build_signature(method_config))
     return "_".join(parts)
 
 
@@ -170,35 +228,35 @@ def dump_json(path, payload):
         json.dump(payload, handle, indent=2, ensure_ascii=False)
 
 
-def is_stale_metrics(metrics, args, method, runtime_graph):
-    if float((metrics or {}).get("target_winsorize_lower", 0.0)) != float(args.target_winsorize_lower):
+def is_stale_metrics(metrics, method_config, runtime_graph):
+    if float((metrics or {}).get("target_winsorize_lower", 0.0)) != float(method_config["target_winsorize_lower"]):
         return True
-    if float((metrics or {}).get("target_winsorize_upper", 1.0)) != float(args.target_winsorize_upper):
+    if float((metrics or {}).get("target_winsorize_upper", 1.0)) != float(method_config["target_winsorize_upper"]):
         return True
-    if method == "no_graph":
+    if not method_config["use_graph"]:
         return False
     graph_file = (metrics or {}).get("graph_file", "")
     if graph_file.replace("\\", "/") != runtime_graph.replace("\\", "/"):
         return True
-    if (metrics or {}).get("graph_weight_transform", "none") != args.graph_weight_transform:
+    if (metrics or {}).get("graph_weight_transform", "none") != method_config["graph_weight_transform"]:
         return True
-    if int((metrics or {}).get("graph_top_k", 0)) != int(args.graph_top_k):
+    if int((metrics or {}).get("graph_top_k", 0)) != int(method_config["graph_top_k"]):
         return True
-    expected_decay = "none" if method == "static" else args.dynamic_time_decay
+    expected_decay = method_config["graph_time_decay"]
     if (metrics or {}).get("graph_time_decay", "none") != expected_decay:
         return True
-    expected_half_life = 0.0 if method == "static" else float(args.dynamic_decay_half_life_days)
+    expected_half_life = float(method_config["graph_decay_half_life_days"])
     if float((metrics or {}).get("graph_decay_half_life_days", 0.0)) != expected_half_life:
         return True
     return False
 
 
-def maybe_build_graph(args, repo_root, window, method):
-    if method == "no_graph":
+def maybe_build_graph(args, repo_root, window, method_config):
+    if not method_config["use_graph"]:
         return ""
 
-    graph_start, graph_end = graph_dates_for_method(window, method, args.dynamic_graph_months)
-    graph_dir = os.path.join(args.graph_root, method, graph_build_signature(args, method))
+    graph_start, graph_end = graph_dates_for_method(window, method_config, args.dynamic_graph_months)
+    graph_dir = os.path.join(args.graph_root, method_config["method"], graph_build_signature(method_config))
     graph_path = os.path.join(graph_dir, f"{window['window_id']}.csv")
     if os.path.exists(os.path.join(repo_root, graph_path)) and not args.force:
         return graph_path
@@ -218,13 +276,13 @@ def maybe_build_graph(args, repo_root, window, method):
         "--end_date",
         graph_end,
     ]
-    if method == "dynamic6m":
+    if method_config["graph_kind"] == "dynamic6m" and method_config["graph_time_decay"] != "none":
         cmd.extend(
             [
                 "--time_decay",
-                args.dynamic_time_decay,
+                method_config["graph_time_decay"],
                 "--decay_half_life_days",
-                str(args.dynamic_decay_half_life_days),
+                str(method_config["graph_decay_half_life_days"]),
             ]
         )
     run_command(cmd, cwd=repo_root)
@@ -252,10 +310,10 @@ def ensure_runtime_stock_pool(args, repo_root, window):
     return stock_pool_runtime
 
 
-def ensure_runtime_graph(args, repo_root, window, method, graph_file):
+def ensure_runtime_graph(args, repo_root, window, method_config, graph_file):
     runtime_dir = os.path.join(args.runtime_root, window["window_id"])
     stock_pool_runtime = os.path.join(runtime_dir, "stock_pool_runtime.csv")
-    runtime_graph_dir = os.path.join(runtime_dir, method, graph_build_signature(args, method))
+    runtime_graph_dir = os.path.join(runtime_dir, method_config["method"], graph_build_signature(method_config))
     runtime_graph = os.path.join(runtime_graph_dir, "graph_runtime.csv")
     if os.path.exists(os.path.join(repo_root, runtime_graph)) and not args.force:
         return stock_pool_runtime, runtime_graph
@@ -347,18 +405,23 @@ def ensure_embeddings(args, repo_root, window, stock_pool_runtime):
     return embedding_tag
 
 
-def run_training(args, repo_root, window, method, stock_pool_runtime, embedding_tag, runtime_graph):
-    run_tag = os.path.join("rolling_experiments", method, result_signature(args, method), window["window_id"])
+def run_training(args, repo_root, window, method_config, stock_pool_runtime, embedding_tag, runtime_graph):
+    run_tag = os.path.join(
+        "rolling_experiments",
+        method_config["method"],
+        result_signature(method_config),
+        window["window_id"],
+    )
     data_name = os.path.basename(args.market_data).replace(".csv", "")
     metrics_path = os.path.join(repo_root, "results", data_name, run_tag, "metrics.json")
     if os.path.exists(metrics_path) and not args.force:
         existing_metrics = load_json(metrics_path)
-        if not is_stale_metrics(existing_metrics, args, method, runtime_graph):
+        if not is_stale_metrics(existing_metrics, method_config, runtime_graph):
             return run_tag, existing_metrics
 
     cmd = [
         args.python_bin,
-        "train.py",
+        "train.py" if method_config["family"] == "timecma" else "train_baselines.py",
         "--task_name",
         "multistock",
         "--data_path",
@@ -388,9 +451,9 @@ def run_training(args, repo_root, window, method, stock_pool_runtime, embedding_
         "--test_end_date",
         window["test_end_date"],
         "--target_winsorize_lower",
-        str(args.target_winsorize_lower),
+        str(method_config["target_winsorize_lower"]),
         "--target_winsorize_upper",
-        str(args.target_winsorize_upper),
+        str(method_config["target_winsorize_upper"]),
         "--batch_size",
         str(args.batch_size),
         "--freq",
@@ -401,8 +464,6 @@ def run_training(args, repo_root, window, method, stock_pool_runtime, embedding_
         str(args.channel),
         "--e_layer",
         str(args.e_layer),
-        "--d_layer",
-        str(args.d_layer),
         "--dropout_n",
         str(args.dropout_n),
         "--weight_decay",
@@ -411,36 +472,42 @@ def run_training(args, repo_root, window, method, stock_pool_runtime, embedding_
         str(args.epochs),
         "--es_patience",
         str(args.es_patience),
-        "--graph_steps",
-        str(args.graph_steps),
-        "--graph_alpha",
-        str(args.graph_alpha),
-        "--graph_weight_transform",
-        args.graph_weight_transform,
-        "--graph_top_k",
-        str(args.graph_top_k),
         "--num_workers",
         str(args.num_workers),
         "--seed",
         str(args.seed),
-        "--embedding_tag",
-        embedding_tag,
         "--run_tag",
         run_tag,
     ]
-    if runtime_graph:
-        cmd.extend(["--graph_file", runtime_graph])
-        if method == "dynamic6m":
+    if method_config["family"] == "timecma":
+        cmd.extend(
+            [
+                "--d_layer",
+                str(args.d_layer),
+                "--graph_steps",
+                str(args.graph_steps),
+                "--graph_alpha",
+                str(args.graph_alpha),
+                "--graph_weight_transform",
+                method_config["graph_weight_transform"],
+                "--graph_top_k",
+                str(method_config["graph_top_k"]),
+                "--embedding_tag",
+                embedding_tag,
+            ]
+        )
+        if runtime_graph:
+            cmd.extend(["--graph_file", runtime_graph])
             cmd.extend(
                 [
                     "--graph_time_decay",
-                    args.dynamic_time_decay,
+                    method_config["graph_time_decay"],
                     "--graph_decay_half_life_days",
-                    str(args.dynamic_decay_half_life_days),
+                    str(method_config["graph_decay_half_life_days"]),
                 ]
             )
-        else:
-            cmd.extend(["--graph_time_decay", "none", "--graph_decay_half_life_days", "0"])
+    else:
+        cmd.extend(["--model_name", method_config["method"]])
     run_command(cmd, cwd=repo_root)
     return run_tag, load_json(metrics_path)
 
@@ -563,30 +630,35 @@ def main():
     for window in windows:
         print(f"=== Window {window['window_id']} ===", flush=True)
         stock_pool_runtime = ensure_runtime_stock_pool(args, repo_root, window)
-        embedding_tag = ensure_embeddings(args, repo_root, window, stock_pool_runtime)
 
         for method in args.methods:
+            method_config = resolve_method_config(args, method)
+            embedding_tag = ""
+            if method_config["requires_embeddings"]:
+                embedding_tag = ensure_embeddings(args, repo_root, window, stock_pool_runtime)
             runtime_graph = ""
             graph_start = ""
             graph_end = ""
             graph_file = ""
-            if method != "no_graph":
-                graph_file = maybe_build_graph(args, repo_root, window, method)
-                graph_start, graph_end = graph_dates_for_method(window, method, args.dynamic_graph_months)
-                stock_pool_runtime, runtime_graph = ensure_runtime_graph(args, repo_root, window, method, graph_file)
+            if method_config["use_graph"]:
+                graph_file = maybe_build_graph(args, repo_root, window, method_config)
+                graph_start, graph_end = graph_dates_for_method(window, method_config, args.dynamic_graph_months)
+                stock_pool_runtime, runtime_graph = ensure_runtime_graph(
+                    args, repo_root, window, method_config, graph_file
+                )
 
             run_tag, metrics = run_training(
                 args=args,
                 repo_root=repo_root,
                 window=window,
-                method=method,
+                method_config=method_config,
                 stock_pool_runtime=stock_pool_runtime,
                 embedding_tag=embedding_tag,
                 runtime_graph=runtime_graph,
             )
             rows.append(
                 {
-                    "method": method,
+                    "method": method_config["method"],
                     "window_id": window["window_id"],
                     "test_month": window["test_month"],
                     "train_start_date": window["train_start_date"],
@@ -597,18 +669,22 @@ def main():
                     "test_end_date": window["test_end_date"],
                     "graph_start_date": graph_start,
                     "graph_end_date": graph_end,
-                    "graph_weight_transform": metrics.get("graph_weight_transform", args.graph_weight_transform),
-                    "graph_top_k": metrics.get("graph_top_k", args.graph_top_k),
+                    "graph_weight_transform": metrics.get("graph_weight_transform", method_config["graph_weight_transform"]),
+                    "graph_top_k": metrics.get("graph_top_k", method_config["graph_top_k"]),
                     "graph_time_decay": metrics.get(
                         "graph_time_decay",
-                        "none" if method == "static" else (args.dynamic_time_decay if method == "dynamic6m" else "none"),
+                        method_config["graph_time_decay"],
                     ),
                     "graph_decay_half_life_days": metrics.get(
                         "graph_decay_half_life_days",
-                        0.0 if method != "dynamic6m" else args.dynamic_decay_half_life_days,
+                        method_config["graph_decay_half_life_days"],
                     ),
-                    "target_winsorize_lower": metrics.get("target_winsorize_lower", args.target_winsorize_lower),
-                    "target_winsorize_upper": metrics.get("target_winsorize_upper", args.target_winsorize_upper),
+                    "target_winsorize_lower": metrics.get(
+                        "target_winsorize_lower", method_config["target_winsorize_lower"]
+                    ),
+                    "target_winsorize_upper": metrics.get(
+                        "target_winsorize_upper", method_config["target_winsorize_upper"]
+                    ),
                     "graph_source_file": graph_file,
                     "graph_file": metrics.get("graph_file", graph_file),
                     "stock_pool_file": metrics.get("stock_pool_file", stock_pool_runtime),
